@@ -21,6 +21,7 @@ struct TrackInfo
       int32_t height;
       float frameRate;
       ColorRange colorRange;
+      bool alphaMode;
     } v;
     struct
     {
@@ -77,6 +78,7 @@ private:
 
 	int mVideoTrack; //< 対象ビデオトラック
 	int mAudioTrack; //< 対象オーディオトラック
+  bool mVideoAlphaMode;
 
 	nestegg_packet* mPkt;
 

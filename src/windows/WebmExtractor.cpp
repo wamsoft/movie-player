@@ -26,6 +26,7 @@ WebmExtractor::WebmExtractor()
   mCurrentTrackType = TRACK_TYPE_UNKNOWN;
   mDiscardPadding = 0;
   mIsKeyFrame = false;
+  mVideoAlphaMode = false;
 }
 
 WebmExtractor::~WebmExtractor()
@@ -151,6 +152,7 @@ WebmExtractor::GetTrackInfo(int32_t trackIndex, TrackInfo *info)
     info->v.height    = vparams.height;
     info->v.frameRate = 1.0f / ns_to_s(default_duration);
     info->v.colorRange = (ColorRange)vparams.range;
+    info->v.alphaMode  = vparams.alpha_mode;
 
   } else if (type == NESTEGG_TRACK_AUDIO) {
 
@@ -210,7 +212,16 @@ WebmExtractor::SelectTrack(TrackType type, int32_t trackIndex)
 {
   switch (type) {
   case TRACK_TYPE_VIDEO:
-    mVideoTrack = trackIndex;
+    {
+      nestegg_video_params vparams;
+      int ret = nestegg_track_video_params(mCtx, trackIndex, &vparams);
+      if (ret < 0) {
+        LOGE("unknown video track param");
+        return false;
+      }
+      mVideoTrack = trackIndex;
+      mVideoAlphaMode = vparams.alpha_mode;
+    }
     break;
   case TRACK_TYPE_AUDIO:
     mAudioTrack = trackIndex;
@@ -275,6 +286,22 @@ WebmExtractor::ReadSampleData(FramePacket *packet)
   packet->arg         = mDiscardPadding;
   packet->type        = mCurrentTrackType;
   packet->timeStampNs = mTimeStampNs;
+
+  if (mCurrentTrackType == TRACK_TYPE_VIDEO && mVideoAlphaMode) {
+    unsigned char* add_data;
+    size_t add_length;
+    int ret = nestegg_packet_additional_data(mPkt, 1, &add_data, &add_length);
+    if (ret != 0) {
+      LOGV("packet additionaldata failed.\n");
+      packet->ReleaseAdd();
+    } else {
+      packet->ResizeAdd(add_length);
+      if (packet->adddata) {
+        packet->adddataSize = add_length;
+        memcpy(packet->adddata, add_data, add_length);
+      }
+    }
+  }
 
 #if defined(DEBUG_INFO_PACKET)
   packet->PrintInfo(mBlockFrameIndex);
