@@ -358,9 +358,11 @@ MoviePlayer::RenderFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes
   mPlayer->RenderFrame(dst, w, h, strideBytes, internalFormat);
 }
 
-IMoviePlayer* IMoviePlayer::CreateMoviePlayer(const char *filename)
+IMoviePlayer *
+IMoviePlayer::CreateMoviePlayer(const char *filename, ColorFormat format)
 {
   MoviePlayer *player = new MoviePlayer();
+  player->SetColorFormat(format);
   if (player->Open(filename)) {
     return player;
   }

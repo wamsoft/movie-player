@@ -51,7 +51,7 @@ cmake_policy(SET CMP0064 ${pre_cmp0064})
 endif()
 
 # ------------------------------------------------------------------------------
-# libwem版対応アーキテクチャ共通
+# nestegg版対応アーキテクチャ共通
 # ------------------------------------------------------------------------------
 if(WIN32 OR LINUX)
 
@@ -70,13 +70,16 @@ add_library(${PROJ_NAME} STATIC
 	src/windows/WebmExtractor.cpp
 	src/windows/MkvFileReader.cpp
 	src/windows/MoviePlayerCore.cpp
-	src/windows/MoviePlayer.cpp)
+	src/windows/MoviePlayer.cpp
+	extlibs/nestegg/src/nestegg.c
+)
 
 target_include_directories(${PROJ_NAME} 
 PUBLIC 
 	include
 PRIVATE
 	src/windows
+	extlibs/nestegg/include
 	extlibs/libyuv/include
 	)
 
@@ -119,27 +122,7 @@ endif()
 endif()
 
 # ------------------------------------------------------------------------------
-# libwem版対応アーキテクチャ個別：Windows
-# ------------------------------------------------------------------------------
-if(WIN32)
-
-# webm は vcpkg にあるが find_package 用のコンフィグがない
-# ※vcpkgのwebmは、staticのときはlibwebm.lib、dynamicのときはwebm.libとなるので
-#   真面目にやるならtripletを見て対応を振り分けてやる必要がある。
-if(${VCPKG_TARGET_TRIPLET} MATCHES "static")
-find_library(LIBWEBM libwebm)
-target_link_libraries(${PROJ_NAME} PUBLIC ${LIBWEBM})
-target_compile_definitions(${PROJ_NAME} PUBLIC WEBM_STATIC)
-else()
-find_library(LIBWEBM webm)
-target_link_libraries(${PROJ_NAME} PUBLIC ${LIBWEBM})
-endif()
-
-
-endif()
-
-# ------------------------------------------------------------------------------
-# libwem版対応アーキテクチャ個別：Linux
+# nestegg版対応アーキテクチャ個別：Linux
 # ------------------------------------------------------------------------------
 if(LINUX)
 
@@ -147,17 +130,6 @@ if(LINUX)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(${PROJ_NAME} PUBLIC ${CMAKE_THREAD_LIBS_INIT})
-
-# Linux 版は webm.a (vcpkgのlinux向けtripletには-staticがないので
-# 多分windowsのdynamicと同じロジックでこの名前になってるのだと思われる)
-find_library(LIBWEBM webm)
-target_link_libraries(${PROJ_NAME} PUBLIC ${LIBWEBM})
-# libwebm のヘッダで、相対ではなくルートからのパスで include する部分があり
-# linux だとこれが見つけられずにコケてしまうので明示的に include パスを追加する
-# (mkvparser/ 以下のヘッダで "mkvparser/xxxx.h" をincludeしてる)
-target_include_directories(${PROJ_NAME} PUBLIC
-	"$ENV{VCPKG_ROOT}/installed/x64-linux/include/libwebm"
-)
 
 endif()
 

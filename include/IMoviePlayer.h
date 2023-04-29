@@ -60,12 +60,12 @@ public:
   {}
   virtual ~IMoviePlayer() {}
 
-  virtual void Play(bool loop = false)                  = 0;
-  virtual void Stop()                                   = 0;
-  virtual void Pause()                                  = 0;
-  virtual void Resume()                                 = 0;
-  virtual void Seek(int64_t posUs)                      = 0;
-  virtual void SetLoop(bool loop)                       = 0;
+  virtual void Play(bool loop = false) = 0;
+  virtual void Stop()                  = 0;
+  virtual void Pause()                 = 0;
+  virtual void Resume()                = 0;
+  virtual void Seek(int64_t posUs)     = 0;
+  virtual void SetLoop(bool loop)      = 0;
 
   // RenderFrameで渡されるColorFormatではなく固定のフォーマットとして設定する
   // Open()前に呼ぶ必要があり、Open後の呼び出しは作用が保証されない。
@@ -105,7 +105,8 @@ public:
     mOnAudioDecodedUserPtr = userPtr;
   }
 
-  static IMoviePlayer* CreateMoviePlayer(const char *filename);
+  static IMoviePlayer *CreateMoviePlayer(const char *filename,
+                                         ColorFormat format = UNKNOWN);
 
 protected:
   ColorFormat mColorFormat;

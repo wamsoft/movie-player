@@ -17,7 +17,7 @@ webm と言っていますが内部使用する API/ライブラリの関係上�
   - カラー変換を毎 RenderFrame()ごとに行っていて少し非効率
   - **なんかスレッド周りでケアしなきゃいけない問題があったはずだが失念…**
 - Windows
-  - libwebm + libvpx で cpu でのデコードで対応
+  - nestegg + libvpx で cpu でのデコードで対応
   - ビデオのみ動作。オーディオ非対応
   - CPU ベース処理で generic な作りなので、別アーキテクチャでも動作する
     - `windows/` ディレクトリでやってるので、本格的に linux とか MacOS への対応する場合はディレクトリ名をなんか考えたい
@@ -124,9 +124,9 @@ vcpkg + cmake の環境を想定しています。
 
 ### 採用ライブラリ等
 
-- libwebm / vcpkg
 - libvpx / vcpkg
 - libyuv / 自前(`extlibs/`のもの)
+- nestegg / 自前(`extlibs/`のもの)
 
 以下は将来的に参照する可能性のあるライブラリ群。
 
@@ -199,7 +199,7 @@ movie_exporter は動作して、画像出力ができています。
 - `VCPKG_ROOT`設定
   - `export VCPKG_ROOT=/foo/bar/vcpkg`
 - 依存ライブラリをインストールする
-  - `./vcpkg/vcpkg install libwebm libvpx`
+  - `./vcpkg/vcpkg install libvpx`
   - libvpx が nasm と pkgconfig を要求するので導入
     - `sudo apt-get install nasm pkgconfig`
 - cmake が無いのでインストール
