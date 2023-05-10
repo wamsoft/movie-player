@@ -57,8 +57,10 @@ struct DecodedBuffer : public BufferQueueEntryBase
     // type: audio
     struct
     {
+      AudioFormat format;
       int32_t channels;
       int32_t sampleRate;
+      int32_t samples;  // バッファ内のサンプル数
     } a;
   };
 
@@ -211,13 +213,18 @@ public:
       } vpx;
       struct
       {
-        // TODO
+        int32_t sampleRate;
+        int32_t channels;
       } vorbis;
       struct
       {
-        // TODO
+        int32_t sampleRate;
+        int32_t channels;
       } opus;
     };
+
+    // CodecPrivateデータ。WebMでは実質的にVorbis専用。
+    std::vector<std::vector<uint8_t>> privateData;
   };
 
 public:
@@ -236,6 +243,8 @@ public:
   virtual void Stop();
 
   const CodecId GetCodecId() const { return mCodecId; }
+
+  virtual const char *CodecName() const = 0;
 
   int32_t DequeueFramePacketIndex();
   FramePacket *GetFramePacket(int32_t bufIndex);
@@ -259,6 +268,9 @@ public:
 
 protected:
   void Decode();
+
+  bool CommonDecodeArgCheck(DecodedBuffer *dcBuf, FramePacket *packet);
+  void CommonDebugFrameInfo(FramePacket *packet);
 
 protected:
   CodecId mCodecId;
@@ -297,4 +309,11 @@ public:
   virtual ~AudioDecoder() {}
 
   virtual DecoderType Type() const { return DECODER_TYPE_AUDIO; }
+
+  int32_t SampleRate() const { return mSampleRate; }
+  int32_t Channes() const { return mChannels; }
+
+protected:
+  int32_t mSampleRate;
+  int32_t mChannels;
 };

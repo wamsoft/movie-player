@@ -21,6 +21,8 @@ public:
   virtual bool Done() override;
   virtual bool DecodeFrame(DecodedBuffer *dcBuf, FramePacket *packet) override;
 
+  virtual const char *CodecName() const { return "vpx"; }
+
 private:
   void CodecErrorMessage(const char *msg);
   void CopyToDecodedBuffer(DecodedBuffer *vdcBuf, uint64_t time, vpx_image *vpxImg, vpx_image *vpxImgAlpha = nullptr);

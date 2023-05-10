@@ -29,9 +29,10 @@ struct BufferQueueEntryBase
   {
     InitBuffer();
   }
-  virtual ~BufferQueueEntryBase() { 
-    Release(); 
-    ReleaseAdd(); 
+  virtual ~BufferQueueEntryBase()
+  {
+    Release();
+    ReleaseAdd();
   }
 
   void CopyFrom(BufferQueueEntryBase *from)
@@ -50,9 +51,9 @@ struct BufferQueueEntryBase
 
   void InitBuffer()
   {
-    data     = nullptr;
-    dataSize = 0;
-    capacity = 0;
+    data        = nullptr;
+    dataSize    = 0;
+    capacity    = 0;
     adddata     = nullptr;
     adddataSize = 0;
     addcapacity = 0;
@@ -115,8 +116,6 @@ struct BufferQueueEntryBase
       addcapacity = 0;
     }
   }
-
-
 };
 
 template<class T>

@@ -205,12 +205,12 @@ MoviePlayerCore::SendTrackControl(int track, int32_t msg, int64_t arg, void *dat
   switch (track) {
   case TRACK_VIDEO:
     if (mVideoTrackPlayer != nullptr) {
-      mVideoTrackPlayer->PostMessage(msg, arg, data);
+      mVideoTrackPlayer->Post(msg, arg, data);
     }
     break;
   case TRACK_AUDIO:
     if (mAudioTrackPlayer != nullptr) {
-      mAudioTrackPlayer->PostMessage(msg, arg, data);
+      mAudioTrackPlayer->Post(msg, arg, data);
     }
     break;
   default:

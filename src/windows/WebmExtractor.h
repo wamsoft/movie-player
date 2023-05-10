@@ -49,6 +49,8 @@ public:
 
   size_t GetTrackCount();
   bool GetTrackInfo(int32_t trackIndex, TrackInfo *info);
+  bool GetCodecPrivateData(int32_t trackIndex,
+                           std::vector<std::vector<uint8_t>> &privateData);
 
   bool SelectTrack(TrackType type, int32_t trackIndex);
 
@@ -59,7 +61,8 @@ public:
   bool IsReachedEOS() const { return mIsReachedEOS; }
 
 private:
-  static void NestEggLogCallback(nestegg *ctx, unsigned int severity, char const *fmt, ...);
+  static void NestEggLogCallback(nestegg *ctx, unsigned int severity, char const *fmt,
+                                 ...);
   static int MyRead(void *buffer, size_t length, void *userdata);
   static int MySeek(int64_t offset, int whence, void *userdata);
   static int64_t MyTell(void *userdata);

@@ -91,42 +91,16 @@ VpxDecoder::Done()
 bool
 VpxDecoder::DecodeFrame(DecodedBuffer *dcBuf, FramePacket *packet)
 {
-  if (packet == nullptr) {
-    LOGV("invalid frame packet.\n");
-    return false;
-  }
-
-  if (packet->Type() != TRACK_TYPE_VIDEO) {
-    LOGV("invalid frame packet type: %d (must be %d)\n", packet->Type(),
-         TRACK_TYPE_VIDEO);
-    return false;
-  }
-
-  if (dcBuf == nullptr) {
-    LOGV("invalid decoded buffer.\n");
-    return false;
-  }
-
-  if (dcBuf->Type() != TRACK_TYPE_VIDEO) {
-    LOGV("invalid decoder buffer type: %d (must be %d)\n", dcBuf->Type(),
-         TRACK_TYPE_VIDEO);
-    return false;
-  }
-
-  // EOSバッファは特殊バッファで個別のデコーダには回されないはずなので
-  // ここに来てしまったらバグなのでASSERTで捕まえておく
-  if (packet->isEndOfStream || dcBuf->isEndOfStream) {
-    ASSERT(false, "BUG: EOS buffer input.\n");
+  if (!CommonDecodeArgCheck(dcBuf, packet)) {
     return false;
   }
 
 #if defined(DEBUG_INFO_DECODER)
-  LOGV("DecodeFrame: size=%6zu, time=%12llu\n", packet->dataSize, packet->timeStampNs);
+  CommonDebugFrameInfo(packet);
 #endif
 
 #if defined(DEBUG_PERF_DECODER)
-  using namespace std::chrono;
-  high_resolution_clock::time_point begin = high_resolution_clock::now();
+  TimeMeasure tm("VPXDecoder");
 #endif
 
   long deadline       = 0;
@@ -146,9 +120,7 @@ VpxDecoder::DecodeFrame(DecodedBuffer *dcBuf, FramePacket *packet)
   }
 
 #if defined(DEBUG_PERF_DECODER)
-  high_resolution_clock::time_point end = high_resolution_clock::now();
-  microseconds elapsed                  = duration_cast<microseconds>(end - begin);
-  LOGV("PERF: vpx decode: %lld[us]\n", elapsed.count());
+  tm.stop();
 #endif
 
   vpx_codec_iter_t iter = nullptr;
@@ -174,7 +146,7 @@ VpxDecoder::CopyToDecodedBuffer(DecodedBuffer *dcBuf, uint64_t time, vpx_image *
   ASSERT(dcBuf != nullptr, "invalid decoded buffer.\n");
 
   if (vpxImg->fmt != VPX_IMG_FMT_I420 && vpxImg->fmt != VPX_IMG_FMT_YV12) {
-    LOGV("unspported vpx image format: fmt=%d\n", vpxImg->fmt);
+    LOGE("unspported vpx image format: fmt=%d\n", vpxImg->fmt);
     return;
   }
 

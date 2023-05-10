@@ -65,8 +65,11 @@ endif()
 add_library(${PROJ_NAME} STATIC
 	src/common/MessageLooper.cpp
 	src/common/PixelConvert.cpp
+	src/common/AudioEngine.cpp
 	src/windows/Decoder.cpp
 	src/windows/VpxDecoder.cpp
+	src/windows/VorbisDecoder.cpp
+	src/windows/OpusDecoder.cpp
 	src/windows/WebmExtractor.cpp
 	src/windows/MkvFileReader.cpp
 	src/windows/MoviePlayerCore.cpp
@@ -79,6 +82,7 @@ PUBLIC
 	include
 PRIVATE
 	src/windows
+	extlibs/miniaudio
 	extlibs/nestegg/include
 	extlibs/libyuv/include
 	)
@@ -94,7 +98,7 @@ target_link_libraries(${PROJ_NAME} PUBLIC unofficial::libvpx::libvpx)
 
 # libyuv(extlibs/配下のものを参照する)
 # SSE/AVX対応コードの64bitビルドはVSでは対応していないので、
-# clangで作成済みのバリナリをリンクする
+# clangで作成済みのバイナリをリンクする
 if(WIN64)
 message("*** Target is WIN64. Use prebuild libyuv-x64 binary. ***")
 find_library(LIBYUV_WIN64_DBG yuv_debug ${CMAKE_CURRENT_LIST_DIR}/extlibs/prebuild/win64)
@@ -107,17 +111,16 @@ target_link_libraries(${PROJ_NAME} PUBLIC yuv)
 endif()
 
 # ogg
-# find_package(Ogg CONFIG REQUIRED)
-# target_link_libraries(${PROJ_NAME} PUBLIC Ogg::ogg)
+find_package(Ogg CONFIG REQUIRED)
+target_link_libraries(${PROJ_NAME} PUBLIC Ogg::ogg)
 
 # vorbis
-# find_package(Vorbis CONFIG REQUIRED)
-# target_link_libraries(${PROJ_NAME} PUBLIC Vorbis::vorbis Vorbis::vorbisfile)
-# target_link_libraries(${PROJ_NAME} PUBLIC Vorbis::vorbis Vorbis::vorbisenc Vorbis::vorbisfile)
+find_package(Vorbis CONFIG REQUIRED)
+target_link_libraries(${PROJ_NAME} PUBLIC Vorbis::vorbis)
 
 # opus
-# find_package(Opus CONFIG REQUIRED)
-# target_link_libraries(${PROJ_NAME} PUBLIC Opus::opus)
+find_package(Opus CONFIG REQUIRED)
+target_link_libraries(${PROJ_NAME} PUBLIC Opus::opus)
 
 endif()
 
