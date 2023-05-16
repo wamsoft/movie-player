@@ -220,7 +220,7 @@ public:
   std::vector<T> &Buffers() { return mBuffers; }
 
 private:
-  std::mutex mGlobalLock;
+  // std::mutex mGlobalLock;
   std::vector<T> mBuffers;
   SafeQueue<int32_t> mReadableQueue;
   SafeQueue<int32_t> mWritableQueue;

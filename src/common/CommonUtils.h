@@ -59,11 +59,6 @@ ns_to_s(uint64_t ns)
 // VSではhigh_resolution_clockはVS2015からsteady_clockの別名になっていて、
 // 中身はQueryPerformanceCounter関数を使用した実装になっている。
 
-#define NS_TO_US(ns)  (ns / 1000)
-#define NS_TO_SEC(ns) (ns / 1'000'000'000)
-#define US_TO_NS(us)  (us * 1000)
-#define US_TO_SEC(ns) (us / 1'000'000)
-
 // 単純な精度確認用
 static void
 simple_time_resolution_test()
@@ -146,6 +141,7 @@ enum AudioFormat
 {
   AUDIO_FORMAT_U8 = 0,
   AUDIO_FORMAT_S16,
+  AUDIO_FORMAT_S32,
   AUDIO_FORMAT_F32,
 };
 

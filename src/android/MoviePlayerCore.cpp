@@ -374,16 +374,6 @@ MoviePlayerCore::Encoding() const
   }
 }
 
-int32_t
-MoviePlayerCore::MaxInputSize() const
-{
-  if (mAudioTrackPlayer != nullptr) {
-    return mAudioTrackPlayer->MaxInputSize();
-  } else {
-    return -1;
-  }
-}
-
 int64_t
 MoviePlayerCore::Duration() const
 {

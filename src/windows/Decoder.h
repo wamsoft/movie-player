@@ -60,7 +60,7 @@ struct DecodedBuffer : public BufferQueueEntryBase
       AudioFormat format;
       int32_t channels;
       int32_t sampleRate;
-      int32_t samples;  // バッファ内のサンプル数
+      int32_t samples; // バッファ内のサンプル数
     } a;
   };
 
@@ -311,7 +311,11 @@ public:
   virtual DecoderType Type() const { return DECODER_TYPE_AUDIO; }
 
   int32_t SampleRate() const { return mSampleRate; }
-  int32_t Channes() const { return mChannels; }
+  int32_t Channels() const { return mChannels; }
+  
+   // TODO 現状S16決め打ち。外部から変更可能にする場合は適宜対応のこと
+  int32_t BitsPerSample() const { return sizeof(int16_t); }
+  int32_t Encoding() const { return AUDIO_FORMAT_S16; }
 
 protected:
   int32_t mSampleRate;

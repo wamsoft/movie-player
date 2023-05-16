@@ -21,8 +21,16 @@ public:
   virtual void SetLoop(bool loop) override;
   virtual void SetColorFormat(ColorFormat format) override;
 
+  // video info
+  virtual bool IsVideoAvailable() const override;
   virtual int32_t Width() const override;
   virtual int32_t Height() const override;
+
+  // audio info
+  virtual bool IsAudioAvailable() const override;
+  virtual void GetAudioFormat(AudioFormat *format) const override;
+
+  // info
   virtual int64_t Duration() const override;
   virtual int64_t Position() const override;
   virtual bool IsPlaying() const override;

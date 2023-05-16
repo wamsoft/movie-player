@@ -33,10 +33,13 @@ public:
   void SetVolume(float vol);
   float Volume() const;
 
-  void Enqueue(void *data, size_t size, bool last);
+  void Enqueue(void *data, size_t size, bool last, int64_t ptsNs);
   void ClearQueue();
 
   ma_result ReadData(void *pFramesOut, ma_uint64 frameCount, ma_uint64 *pFramesRead);
+
+  // TODO test
+  class MoviePlayerCore *mPlayer;
 
 private:
   float mVolume;
@@ -46,14 +49,20 @@ private:
 
   struct DataBuffer
   {
-    void *data;
+    uint8_t *data;
+    std::vector<uint8_t> buf;
     size_t size;
     bool last;
-    DataBuffer(void *data, size_t size, bool last)
-    : data(data)
-    , size(size)
+    int64_t timeStampNs;
+    DataBuffer(void *d, size_t size, bool last, int64_t ptsNs)
+    : size(size)
     , last(last)
-    {}
+    , timeStampNs(ptsNs)
+    {
+      buf.resize(size);
+      memcpy(buf.data(), d, size);
+      data = buf.data();
+    }
   };
 
   std::queue<DataBuffer> mDataQueue;

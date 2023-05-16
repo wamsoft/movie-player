@@ -21,6 +21,7 @@ public:
   //  IMoviePlayer::ColorFormatと逆の並び
   //    DX9:    D3DFMT_A8R8G8B8
   //    libyuv: ARGB
+  // TODO COLOR_ARGB みたいに COLOR_ PREFIX つけたい
   enum ColorFormat
   {
     UNKNOWN = -1,
@@ -34,6 +35,7 @@ public:
   };
 
   // オーディオコールバックで得られるデータの形式
+  // TODO U8/S16/S32/F32 にしたい
   enum PcmEncoding
   {
     PCM_UNKNOWN = -1,
@@ -50,7 +52,6 @@ public:
     int32_t channels;
     int32_t bitsPerSample;
     PcmEncoding encoding;
-    int32_t maxInputSize; // max input buffersize
   };
 
   IMoviePlayer()
@@ -72,6 +73,7 @@ public:
   virtual void SetColorFormat(ColorFormat format) { mColorFormat = format; }
 
   // video info
+  virtual bool IsVideoAvailable() const { return false; }
   virtual int32_t Width() const  = 0;
   virtual int32_t Height() const = 0;
 
@@ -84,7 +86,6 @@ public:
       format->channels      = -1;
       format->bitsPerSample = -1;
       format->encoding      = PCM_UNKNOWN;
-      format->maxInputSize  = -1;
     }
   }
 
@@ -94,16 +95,31 @@ public:
   virtual bool IsPlaying() const   = 0;
   virtual bool Loop() const        = 0;
 
+  // TODO Audioとの絡みで名称変更予定
   // SetColorFormat()で固定フォーマットを指定した場合はformatの値は無視される
   virtual void RenderFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes,
                            ColorFormat format = UNKNOWN) = 0;
 
+  // TODO こちらのインタフェースに変更予定
+  //      - 前回から更新があればtrueが返る
+  //      - フレームごとのカラーフォーマット指定はおそらく無駄なので廃止
+  virtual bool GetVideo(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes)
+  {
+    return false;
+  }
+  virtual bool GetAudio(uint8_t *frames, uint64_t frameCount, uint64_t *framesRead)
+  {
+    return false;
+  }
+
+#if 0 // TODO 削除予定
   // Audioコールバック
   virtual void SetOnAudioDecoded(OnAudioDecoded func, void *userPtr)
   {
     mOnAudioDecoded        = func;
     mOnAudioDecodedUserPtr = userPtr;
   }
+#endif
 
   static IMoviePlayer *CreateMoviePlayer(const char *filename,
                                          ColorFormat format = UNKNOWN);

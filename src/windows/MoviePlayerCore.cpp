@@ -32,7 +32,7 @@ MoviePlayerCore::Init()
 
   mTimer.ClearStartTime();
 
-  mDecodedFrame = nullptr;
+  mDecodedFrame = mDecodedFrameNext = nullptr;
   mDummyFrame.InitByType(TRACK_TYPE_VIDEO, -1);
 
   mAudioEngine = nullptr;
@@ -44,6 +44,8 @@ MoviePlayerCore::InitDummyFrame()
   if (mVideoDecoder) {
     mDummyFrame.InitByType(TRACK_TYPE_VIDEO, -1);
     mDummyFrame.Resize(mWidth * mHeight * 4);
+    mDummyFrame.timeStampNs = 0;
+    mDummyFrame.frame = 0; // TODO -1だと無効フレーム扱いなので、ダミーフラグを付けるかなんか考える
     memset(mDummyFrame.data, 0xff, mDummyFrame.capacity);
     {
       std::lock_guard<std::mutex> lock(mDecodedFrameMutex);
@@ -153,6 +155,12 @@ MoviePlayerCore::SetPixelFormat(PixelFormat format)
   mPixelFormat = format;
 }
 
+bool
+MoviePlayerCore::IsVideoAvailable() const
+{
+  return (mVideoDecoder != nullptr);
+}
+
 int32_t
 MoviePlayerCore::Width() const
 {
@@ -167,6 +175,52 @@ MoviePlayerCore::Height() const
   std::lock_guard<std::mutex> lock(mApiMutex);
 
   return mHeight;
+}
+
+bool
+MoviePlayerCore::IsAudioAvailable() const
+{
+  return (mAudioDecoder != nullptr);
+}
+
+int32_t
+MoviePlayerCore::SampleRate() const
+{
+  if (IsAudioAvailable()) {
+    return mAudioDecoder->SampleRate();
+  } else {
+    return -1;
+  }
+}
+
+int32_t
+MoviePlayerCore::Channels() const
+{
+  if (IsAudioAvailable()) {
+    return mAudioDecoder->Channels();
+  } else {
+    return -1;
+  }
+}
+
+int32_t
+MoviePlayerCore::BitsPerSample() const
+{
+  if (IsAudioAvailable()) {
+    return mAudioDecoder->BitsPerSample();
+  } else {
+    return -1;
+  }
+}
+
+int32_t
+MoviePlayerCore::Encoding() const
+{
+  if (IsAudioAvailable()) {
+    return mAudioDecoder->Encoding();
+  } else {
+    return -1;
+  }
 }
 
 int64_t
@@ -234,7 +288,7 @@ MoviePlayerCore::SelectTargetTrack()
       mWidth  = info.v.width;
       mHeight = info.v.height;
 
-      mVideoDecoder = Decoder::CreateDecoder(info.codecId);
+      mVideoDecoder = (VideoDecoder *)Decoder::CreateDecoder(info.codecId);
       ASSERT(mVideoDecoder != nullptr, "failed to create video decoder\n");
 
       InitDummyFrame();
@@ -274,7 +328,7 @@ MoviePlayerCore::SelectTargetTrack()
         continue;
       }
 
-      mAudioDecoder = Decoder::CreateDecoder(info.codecId);
+      mAudioDecoder = (AudioDecoder *)Decoder::CreateDecoder(info.codecId);
       ASSERT(mAudioDecoder != nullptr, "failed to create audio decoder\n");
 
       Decoder::Config config;
@@ -298,6 +352,9 @@ MoviePlayerCore::SelectTargetTrack()
       }
       mAudioEngine = new AudioEngine();
       mAudioEngine->Init(AUDIO_FORMAT_S16, info.a.channels, info.a.sampleRate);
+
+      // TODO test
+      mAudioEngine->mPlayer = this;
 
       mExtractor->SelectTrack(TRACK_TYPE_AUDIO, i);
 
@@ -330,26 +387,29 @@ MoviePlayerCore::Open(const char *filepath)
 }
 
 void
-MoviePlayerCore::Decode(bool oneShot)
+MoviePlayerCore::HandleInput(bool isPreloading)
 {
-  Decoder *decoder = nullptr;
+  if (mSawInputEOS) {
+    return;
+  }
 
-  // プリロード制御
-  bool isPreloading  = (GetState() == STATE_PRELOADING || oneShot);
   bool isInputFilled = false;
-  bool isOutputReady = false;
+  bool reachedEOS    = false;
 
-preload_input:
-  if (!mSawInputEOS || (isPreloading && !isInputFilled)) {
-    bool reachedEOS = false;
-    TrackType type  = mExtractor->NextFramePacketType();
+  do {
+    Decoder *decoder = nullptr;
+    TrackType type   = mExtractor->NextFramePacketType();
     switch (type) {
     default:
     case TRACK_TYPE_VIDEO:
       decoder = mVideoDecoder;
+      // Vトラックあるのにデコーダが居ないのはバグなので捕まえておく
+      ASSERT(decoder != nullptr, "BUG: invali video decoder.\n");
       break;
     case TRACK_TYPE_AUDIO:
       decoder = mAudioDecoder;
+      // Aトラックあるのにデコーダが居ないのはバグなので捕まえておく
+      ASSERT(decoder != nullptr, "BUG: invali audio decoder.\n");
       break;
     }
 
@@ -358,91 +418,99 @@ preload_input:
     if (packetIndex >= 0) {
       // LOGV("*** Decode - deq write buf index = %d\n", packetIndex);
       FramePacket *packet = decoder->GetFramePacket(packetIndex);
-      mSawInputEOS        = packet->isEndOfStream;
       mExtractor->ReadSampleData(packet);
+      mSawInputEOS = packet->isEndOfStream;
       decoder->QueueFramePacketIndex(packetIndex);
       // LOGV("*** Decode - enq read buf index = %d\n", packetIndex);
       mExtractor->Advance();
     } else {
+      // V/A考慮していないが、多分Vの入力が埋まって入力プリロードは終了
       isInputFilled = true;
     }
-  }
-  if (isPreloading && !isInputFilled) {
-    goto preload_input;
+  } while (isPreloading && !isInputFilled);
+}
+
+void
+MoviePlayerCore::HandleOutput(bool isPreloading)
+{
+  if (mSawOutputEOS) {
+    return;
   }
 
-  // Decoderからデコード済みバッファを取得
-preload_output:
-  if (!mSawOutputEOS) {
+  bool isOutputReady    = false;
+  bool isFirstOfPreload = isPreloading;
+  int32_t dcBufIndex    = -1;
+
+  do {
     if (mVideoDecoder != nullptr) {
-      decoder            = mVideoDecoder;
-      int32_t dcBufIndex = decoder->DequeueDecodedBufferIndex();
-      if (dcBufIndex >= 0) {
-        // LOGV("r deq: %d\n", dcBufIndex);
-        DecodedBuffer *buf = decoder->GetDecodedBuffer(dcBufIndex);
-        mSawOutputEOS      = buf->isEndOfStream;
-        if (!buf->isEndOfStream) {
-          // TODO AudioもあるならA/V同期が必要
-          int64_t mediaTimeUs = NS_TO_US(buf->timeStampNs);
-          mTimer.SetCurrentMediaTime(mediaTimeUs);
-          if (!mTimer.IsStarted()) {
-            mTimer.SetStartTime(mediaTimeUs);
-          }
-          int64_t renderDelay = mTimer.CalcDelay(mediaTimeUs);
-          if (renderDelay > 0) {
-            // LOGV("render delay sleep: %lld us \n", renderDelay);
-            std::this_thread::sleep_for(std::chrono::microseconds(renderDelay));
-          }
-
-          if (buf->dataSize > 0) {
-            // LOGV("update rendered buffer: pts=%llu\n", buf->timeStampNs);
-            UpdateDecodedFrame(buf);
-            isOutputReady = true;
+      // 次フレームが未セットならデコード出力を吸い上げ
+      if (mDecodedFrameNext == nullptr) {
+        dcBufIndex = mVideoDecoder->DequeueDecodedBufferIndex();
+        if (dcBufIndex >= 0) {
+          DecodedBuffer *buf = mVideoDecoder->GetDecodedBuffer(dcBufIndex);
+          mSawOutputEOS |= buf->isEndOfStream;
+          if (!buf->isEndOfStream) {
+            if (buf->dataSize > 0) {
+              UpdateDecodedFrameNext(buf);
+              isOutputReady = true;
+            }
           }
         }
-        // VはUpdateDecodedFrame()内部でRelease処理を行っている
-        // TODO なんでだっけ…？dataSizeが＞０であるなしにかかわらずrelase必要だし
-        //      dcBufIndexが有効な限り、ここでやるのが妥当なのでは…？
-        // decoder->ReleaseDecodedBufferIndex(dcBufIndex);
+      }
+
+      // 次フレームに入れ替えるかチェック
+      if (mDecodedFrameNext) {
+        int64_t timeDiff   = -1;
+        int64_t nextTimeUs = ns_to_us(mDecodedFrameNext->timeStampNs);
+        if (isFirstOfPreload) {
+          // プリロード時の初回は強制的にDecodedFrame更新
+          UpdateDecodedFrame(nullptr);
+          isFirstOfPreload = false;
+        } else if (mTimer.IsStarted()) {
+          timeDiff = mTimer.CalcDiffFromMediaTime(nextTimeUs);
+          timeDiff = mTimer.CalcDiffFromSystemTime(nextTimeUs); // TODO test
+          // LOGV("frame diff time=%lld\n", timeDiff);
+
+          // TODO フレームスキップ
+          // UpdateDecodedFrameNext(nullptr);
+
+          if (timeDiff >= 0) {
+            UpdateDecodedFrame(nullptr);
+          }
+        }
       }
     }
 
     if (mAudioDecoder != nullptr) {
-      decoder            = mAudioDecoder;
-      int32_t dcBufIndex = decoder->DequeueDecodedBufferIndex();
+      dcBufIndex = mAudioDecoder->DequeueDecodedBufferIndex();
       if (dcBufIndex >= 0) {
-        // LOGV("r deq: %d\n", dcBufIndex);
-        DecodedBuffer *buf = decoder->GetDecodedBuffer(dcBufIndex);
-        mSawOutputEOS      = buf->isEndOfStream;
+        DecodedBuffer *buf = mAudioDecoder->GetDecodedBuffer(dcBufIndex);
+        mSawOutputEOS |= buf->isEndOfStream;
         if (!buf->isEndOfStream) {
-          // TODO A/V同期が必要
-          if (!mVideoDecoder) {
-            // Vがない場合は、Aでメディアタイマーを更新する
-            int64_t mediaTimeUs = NS_TO_US(buf->timeStampNs);
-            mTimer.SetCurrentMediaTime(mediaTimeUs);
-            if (!mTimer.IsStarted()) {
-              mTimer.SetStartTime(mediaTimeUs);
-            }
-          }
           if (buf->dataSize > 0) {
-            mAudioEngine->Enqueue(buf->data, buf->dataSize, false);
+            // TODO GetAudio() を実装したらここはなくなる
+            mAudioEngine->Enqueue(buf->data, buf->dataSize, false, buf->timeStampNs);
             if (!mVideoDecoder) {
               isOutputReady = true;
             }
-          } else {
-            LOGE("**** INVALID DECODED DATA ****\n");
           }
-        } else {
-          // TODO loopじゃない場合はminiaudio的にlastを送出する必要ある？
         }
-        decoder->ReleaseDecodedBufferIndex(dcBufIndex);
+        mAudioDecoder->ReleaseDecodedBufferIndex(dcBufIndex);
       }
     }
-  }
+  } while (isPreloading && !isOutputReady);
+}
 
-  if (isPreloading && !isOutputReady) {
-    goto preload_output;
-  }
+void
+MoviePlayerCore::Decode(bool oneShot)
+{
+  Decoder *decoder = nullptr;
+
+  // プリロード制御
+  bool isPreloading = (GetState() == STATE_PRELOADING || oneShot);
+
+  HandleInput(isPreloading);
+  HandleOutput(isPreloading);
 
   // ワンショットはメッセージチェインせず返る
   if (isPreloading) {
@@ -451,10 +519,14 @@ preload_output:
 
   bool isDecodeCompleted = mSawInputEOS && mSawOutputEOS;
   if (isDecodeCompleted) {
+
+#if 0 // TODO sleepではなくてyiedして空ループで消化する感じで
     // 最後のフレームは(Duration-現フレームPTS)分だけ残す
     int64_t postDelay = mTimer.GetDuration() - mTimer.GetCurrentMediaTime();
     // LOGV("render post delay sleep: %lld us \n", postDelay);
     std::this_thread::sleep_for(std::chrono::microseconds(postDelay));
+#endif
+
     if (mIsLoop) {
       LOGV("---- Loop ----\n");
       Post(MSG_SEEK, 0);
@@ -499,7 +571,6 @@ MoviePlayerCore::HandleMessage(int32_t what, int64_t arg, void *data)
 
   case MSG_RESUME:
     if (GetState() == STATE_PAUSE) {
-      mTimer.ClearStartTime();
       SetState(STATE_PLAY);
       Post(MSG_DECODE);
     }
@@ -519,6 +590,7 @@ MoviePlayerCore::HandleMessage(int32_t what, int64_t arg, void *data)
     // (実際の所スレッド絡みなので毎回コピー保持したほうが丸いので、将来的にはそうなるかも)
     mDummyFrame.CopyFrom(mDecodedFrame, false);
     UpdateDecodedFrame(&mDummyFrame);
+    UpdateDecodedFrameNext(nullptr);
     if (mVideoDecoder != nullptr) {
       // Syncしないと、ExtractorがSeekして少し読んだあとに
       // 非同期に呼ばれたFlushが挟まっておかしくなる可能性がある
@@ -531,10 +603,8 @@ MoviePlayerCore::HandleMessage(int32_t what, int64_t arg, void *data)
     mTimer.ClearStartTime();
     mSawInputEOS  = false;
     mSawOutputEOS = false;
-    if (GetState() != STATE_PLAY) {
-      // 再生中ではない場合は、シーク動作のためにプリロード相当の処理をする
-      Decode(true);
-    }
+    // シーク動作のためにプリロード相当の処理をする
+    Decode(true);
     break;
 
   case MSG_STOP:
@@ -555,6 +625,53 @@ MoviePlayerCore::HandleMessage(int32_t what, int64_t arg, void *data)
   std::this_thread::yield();
 }
 
+void
+MoviePlayerCore::UpdateDecodedFrame(DecodedBuffer *newFrame)
+{
+  if (mVideoDecoder) {
+    std::lock_guard<std::mutex> lock(mDecodedFrameMutex);
+
+    // newFrameを明示的に指定しない場合は、mDecodedFrameNextをスライドする
+    if (newFrame == nullptr) {
+      newFrame          = mDecodedFrameNext;
+      mDecodedFrameNext = nullptr;
+    }
+    DecodedBuffer *prevFrame = mDecodedFrame;
+    mDecodedFrame            = newFrame;
+
+    // 前フレームがダミーフレームでなければ開放
+    if (prevFrame != &mDummyFrame) {
+      mVideoDecoder->ReleaseDecodedBufferIndex(prevFrame->bufIndex);
+    }
+
+    // 新フレームがダミーフレームではなく、
+    // Audioトラックがない場合は、メディアタイマーをビデオフレームのPTSで更新
+    if (!IsAudioAvailable() && newFrame != &mDummyFrame) {
+      int64_t mediaTimeUs = ns_to_us(mDecodedFrame->timeStampNs);
+      mTimer.SetCurrentMediaTime(ns_to_us(mediaTimeUs));
+      if (!mTimer.IsStarted()) {
+        mTimer.SetStartTime(mediaTimeUs);
+      }
+    }
+  }
+}
+
+void
+MoviePlayerCore::UpdateDecodedFrameNext(DecodedBuffer *nextFrame)
+{
+  if (mVideoDecoder) {
+    std::lock_guard<std::mutex> lock(mDecodedFrameMutex);
+
+    // フレームスキップなどで破棄するケースではnextがnon-nullで呼ばれるので
+    // その場合は先に現在のnextを開放する
+    if (mDecodedFrameNext != nullptr) {
+      mVideoDecoder->ReleaseDecodedBufferIndex(mDecodedFrameNext->bufIndex);
+      mDecodedFrameNext = nullptr;
+    }
+    mDecodedFrameNext = nextFrame;
+  }
+}
+
 const DecodedBuffer *
 MoviePlayerCore::GetDecodedFrame() const
 {
@@ -563,20 +680,33 @@ MoviePlayerCore::GetDecodedFrame() const
   return mDecodedFrame;
 }
 
-void
-MoviePlayerCore::UpdateDecodedFrame(DecodedBuffer *newFrame)
+bool
+MoviePlayerCore::GetAudio(uint8_t *frames, uint64_t frameCount, uint64_t *framesRead)
 {
-  // DecodedBufferはmutex保護されたindexでバッファスロット管理してあるので、
-  // データ自体の並列アクセスは起こらない。
-  // なのでポインタの付替だけmutexで保護されていればOK。
+  // TODO WIP
+  if (IsAudioAvailable()) {
+    // TODO ReadData 相当の処理
+    // mAudioDecoder->
 
-  if (mVideoDecoder) {
-    std::lock_guard<std::mutex> lock(mDecodedFrameMutex);
+    // - 足りない場合の処理
+    // - peekがないので面倒…
 
-    DecodedBuffer *lastFrame = mDecodedFrame;
-    mDecodedFrame            = newFrame;
-    mVideoDecoder->ReleaseDecodedBufferIndex(lastFrame->bufIndex);
+#if 0 // WIP
+    // Getされたフレームの先頭のPTSを現在のフレームタイムとして記録する
+    // (この瞬間に再生に送られたと見なす)
+    int64_t mediaTimeUs = ns_to_us(buf->timeStampNs);
+    mTimer.SetCurrentMediaTime(mediaTimeUs);
+    if (!mTimer.IsStarted()) {
+      mTimer.SetStartTime(mediaTimeUs);
+    }
+#endif
   }
+
+  // 音声トラックがない、あるいは必要なデータが充足していない
+  if (framesRead) {
+    *framesRead = 0;
+  }
+  return false;
 }
 
 void
@@ -593,6 +723,7 @@ MoviePlayerCore::SetState(State newState)
   if (mAudioEngine) {
     switch (newState) {
     case STATE_PLAY:
+      mTimer.SetStartTime();
       mAudioEngine->Start();
       break;
     case STATE_PAUSE:

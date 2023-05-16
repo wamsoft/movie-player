@@ -152,6 +152,16 @@ MoviePlayer::SetColorFormat(ColorFormat format)
   }
 }
 
+bool
+MoviePlayer::IsVideoAvailable() const
+{
+  if (mPlayer) {
+    return mPlayer->IsVideoAvailable();
+  } else {
+    return false;
+  }
+}
+
 int32_t
 MoviePlayer::Width() const
 {
@@ -169,6 +179,45 @@ MoviePlayer::Height() const
     return mPlayer->Height();
   } else {
     return -1;
+  }
+}
+
+bool
+MoviePlayer::IsAudioAvailable() const
+{
+  if (mPlayer) {
+    return mPlayer->IsAudioAvailable();
+  } else {
+    return false;
+  }
+}
+
+void
+MoviePlayer::GetAudioFormat(AudioFormat *format) const
+{
+  if (IsAudioAvailable() && format != nullptr) {
+    format->sampleRate    = mPlayer->SampleRate();
+    format->channels      = mPlayer->Channels();
+    format->bitsPerSample = mPlayer->BitsPerSample();
+    int32_t encoding      = mPlayer->Encoding();
+    switch (encoding) {
+    case AUDIO_FORMAT_S16:
+      format->encoding = PCM_16;
+      break;
+    case AUDIO_FORMAT_U8:
+      format->encoding = PCM_8;
+      break;
+    case AUDIO_FORMAT_F32:
+      format->encoding = PCM_FLOAT;
+      break;
+    case AUDIO_FORMAT_S32:
+      format->encoding = PCM_32;
+      break;
+    default:
+      format->encoding = PCM_UNKNOWN;
+      ASSERT(false, "unsupported audio encoding: %d", encoding);
+      break;
+    }
   }
 }
 

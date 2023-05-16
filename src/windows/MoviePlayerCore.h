@@ -10,6 +10,9 @@ class AudioEngine;
 
 class MoviePlayerCore : public MessageLooper
 {
+  // TODO test
+  friend class AudioEngine;
+  
 public:
   enum Message
   {
@@ -52,11 +55,19 @@ public:
 
   void SetPixelFormat(PixelFormat format);
 
+  bool IsVideoAvailable() const;
   // width/heightはvideo trackをExtractorでselect後でないと値が入らないので注意
   // MoviePlayer的にはOpen()で必ずスキャン＋SelectTrackするので
   // 「Open後に正しい情報が取れる」という仕様には反さないので問題にはならないはず。
   int32_t Width() const;
   int32_t Height() const;
+
+  bool IsAudioAvailable() const;
+  int32_t SampleRate() const;
+  int32_t Channels() const;
+  int32_t BitsPerSample() const;
+  int32_t Encoding() const;
+
   int64_t Duration() const;
   int64_t Position() const;
   bool IsPlaying() const;
@@ -64,6 +75,8 @@ public:
 
   // TODO A/V 考慮(現状はVideoデータ決め打ち対応)
   const DecodedBuffer *GetDecodedFrame() const;
+
+  bool GetAudio(uint8_t *frames, uint64_t frameCount, uint64_t *framesRead);
 
   // 入力をプリロードする
   void PreLoadInput();
@@ -74,10 +87,17 @@ protected:
   void SelectTargetTrack();
   void Start();
   void Decode(bool oneShot = false);
+  void HandleOutput(bool isPreloading);
+  void HandleInput(bool isPreloading);
+
   void SetState(State newState);
   State GetState() const;
   void InitDummyFrame();
   void UpdateDecodedFrame(DecodedBuffer *newFrame);
+  void UpdateDecodedFrameNext(DecodedBuffer *nextFrame);
+
+  // TODO Audio対応したので、Video決め打ちになってる名前(UpdateDecodedFrameとか)を
+  //      一通りどうするか見直すこと
 
 private:
   // ステート
@@ -85,8 +105,8 @@ private:
   bool mIsLoop;
 
   WebmExtractor *mExtractor;
-  Decoder *mVideoDecoder;
-  Decoder *mAudioDecoder;
+  VideoDecoder *mVideoDecoder;
+  AudioDecoder *mAudioDecoder;
 
   // API用mutex
   mutable std::mutex mApiMutex;
@@ -105,7 +125,7 @@ private:
   // デコード済みフレーム
   mutable std::mutex mDecodedFrameMutex;
   DecodedBuffer mDummyFrame;
-  DecodedBuffer *mDecodedFrame;
+  DecodedBuffer *mDecodedFrame, *mDecodedFrameNext;
 
   // オーディオ
   AudioEngine *mAudioEngine;

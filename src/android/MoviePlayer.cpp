@@ -235,7 +235,6 @@ MoviePlayer::GetAudioFormat(AudioFormat *format) const
     format->sampleRate     = mPlayer->SampleRate();
     format->channels       = mPlayer->Channels();
     format->bitsPerSample  = mPlayer->BitsPerSample();
-    format->maxInputSize   = mPlayer->MaxInputSize();
     int32_t nativeEncoding = mPlayer->Encoding();
     switch (nativeEncoding) {
     case kAudioEncodingPcm16bit:
@@ -251,6 +250,7 @@ MoviePlayer::GetAudioFormat(AudioFormat *format) const
       format->encoding = PCM_32;
       break;
     default:
+      format->encoding = PCM_UNKNOWN;
       ASSERT(false, "unsupported audio encoding: %d", nativeEncoding);
       break;
     }

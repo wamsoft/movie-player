@@ -2,6 +2,9 @@
 #include "BasicLog.h"
 #include "AudioEngine.h"
 
+// TODO test
+#include "MoviePlayerCore.h"
+
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
 
@@ -160,6 +163,9 @@ AudioEngine::Init(AudioFormat format, int32_t channels, int32_t sampleRate)
   mDataPos = 0;
 
   LOGV("miniaudio engine initialized!\n");
+  
+  // TODO test
+  mPlayer = nullptr;
 
   return true;
 }
@@ -212,12 +218,12 @@ AudioEngine::Volume() const
 }
 
 void
-AudioEngine::Enqueue(void *data, size_t size, bool last)
+AudioEngine::Enqueue(void *data, size_t size, bool last, int64_t ptsNs)
 {
   std::lock_guard<std::mutex> lock(mDataMutex);
 
-  mDataQueue.push(DataBuffer(data, size, last));
-  // LOGV("enqueue audio buffer: size=%llu, count=%llu\n", size, mDataQueue.size());
+  mDataQueue.push(DataBuffer(data, size, last, ptsNs));
+  LOGV("enqueue audio buffer: size=%llu, count=%llu, time=%lld\n", size, mDataQueue.size(), ptsNs);
 }
 
 void
@@ -233,6 +239,8 @@ AudioEngine::ReadData(void *pFramesOut, ma_uint64 frameCount, ma_uint64 *pFrames
 {
   std::lock_guard<std::mutex> lock(mDataMutex);
 
+  int64_t mediaTimeNs = INT64_MAX;
+
   uint8_t *dst    = (uint8_t *)pFramesOut;
   ma_uint64 size  = frameCount * mFrameSize;
   ma_uint64 count = 0;
@@ -240,6 +248,12 @@ AudioEngine::ReadData(void *pFramesOut, ma_uint64 frameCount, ma_uint64 *pFrames
 
   while (!last && size > 0 && mDataQueue.size() > 0) {
     const DataBuffer &data = mDataQueue.front();
+  
+    // TODO test
+    if (mediaTimeNs == INT64_MAX) {
+      mediaTimeNs = data.timeStampNs;
+    }
+
     int remain             = data.size - mDataPos;
     if (size < remain) {
       memcpy(dst, (uint8_t *)data.data + mDataPos, size);
@@ -264,19 +278,23 @@ AudioEngine::ReadData(void *pFramesOut, ma_uint64 frameCount, ma_uint64 *pFrames
 
   // デコードが間に合っていない場合の処理
   if (!last && count < frameCount) {
-#if 0
     // デコードが間に合っていない場合はBUSYを返す
     result = MA_BUSY;
-#else
-    // デコードが間に合っていない場合は無音を埋めて返す
-    size_t gapBytes = (frameCount - count) * mFrameSize;
-    memset(dst, 0, gapBytes);
-    count = frameCount;
-#endif
   }
 
   if (pFramesRead) {
     *pFramesRead = count;
+  }
+  
+  // TODO test
+  if (mPlayer && mediaTimeNs != INT64_MAX) {
+    int64_t mediaTime = ns_to_us(mediaTimeNs);
+    LOGV("size=%lld/%lld, time=%lld\n", count, frameCount, mediaTime);
+    // TODO 先頭のカウンタ＋送出サンプル数から計算したカウンタ
+    mPlayer->mTimer.SetCurrentMediaTime(mediaTime);
+    if (!mPlayer->mTimer.IsStarted()) {
+      mPlayer->mTimer.SetStartMediaTime(mediaTime);
+    }
   }
 
   return result;
