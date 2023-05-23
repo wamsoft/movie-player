@@ -32,23 +32,19 @@ get_num_of_cpus()
 // -----------------------------------------------------------------------------
 // time unit conversion
 // -----------------------------------------------------------------------------
-inline int64_t
-us_to_ns(uint64_t us)
-{
-  return us * 1000;
-}
+// clang-format off
+inline int64_t  us_to_ns(int64_t us)  { return us * 1000; }
+inline uint64_t us_to_ns(uint64_t us) { return us * 1000; }
 
-inline int64_t
-ns_to_us(uint64_t ns)
-{
-  return ns / 1000;
-}
+inline int64_t  ns_to_us(int64_t ns)  { return ns / 1000; }
+inline uint64_t ns_to_us(uint64_t ns) { return ns / 1000; }
 
-inline double
-ns_to_s(uint64_t ns)
-{
-  return ns / 1'000'000'000.0;
-}
+inline double   us_to_s(int64_t us)   { return us / 1'000'000.0; }
+inline double   ns_to_s(int64_t ns)   { return ns / 1'000'000'000.0; }
+
+inline int64_t  s_to_us(int64_t s)    { return s * 1'000'000; }
+inline int64_t  s_to_ns(int64_t s)    { return s * 1'000'000'000.0; }
+// clang-format on
 
 // -----------------------------------------------------------------------------
 // time functions
@@ -286,15 +282,14 @@ public:
 
   void Enqueue(T t)
   {
-    std::lock_guard<std::mutex> lock(mMutex);
+    std::lock_guard<std::recursive_mutex> lock(mMutex);
 
     mQueue.push(t);
   }
 
-  // timeout 0: infinite
   bool Dequeue(T &result)
   {
-    std::lock_guard<std::mutex> lock(mMutex);
+    std::lock_guard<std::recursive_mutex> lock(mMutex);
 
     if (mQueue.empty()) {
       return false;
@@ -308,21 +303,52 @@ public:
 
   size_t Size() const
   {
-    std::lock_guard<std::mutex> lock(mMutex);
+    std::lock_guard<std::recursive_mutex> lock(mMutex);
 
     return mQueue.size();
   }
 
   void Clear()
   {
-    std::lock_guard<std::mutex> lock(mMutex);
+    std::lock_guard<std::recursive_mutex> lock(mMutex);
 
     mQueue = {};
   }
 
+  // FrontとPopはmutex保護していない
+  // ループ処理などで全体をロックした状態で作業したい場合にDequeueでは
+  // 用を成さないケースでmutexを参照してlockした上で使用すること
+  bool Front(T &result)
+  {
+    if (mQueue.empty()) {
+      return false;
+    }
+
+    result = mQueue.front();
+
+    return true;
+  }
+
+  bool Pop()
+  {
+    if (mQueue.empty()) {
+      return false;
+    }
+
+    mQueue.pop();
+
+    return true;
+  }
+
+  void Lock() { mMutex.lock(); }
+  void Unlock() { mMutex.unlock(); }
+
 private:
   std::queue<T> mQueue;
-  mutable std::mutex mMutex;
+  // メンバ関数内部にロックが閉じてる操作と、Lock/Unlockで外部からのロックが
+  // 必要な操作との2系統にわかれてしまったので、多重にロックするケースをケアするため
+  // 念のためrecursiveにしておく
+  mutable std::recursive_mutex mMutex;
 };
 
 // -----------------------------------------------------------------------------

@@ -103,11 +103,13 @@ public:
   // TODO こちらのインタフェースに変更予定
   //      - 前回から更新があればtrueが返る
   //      - フレームごとのカラーフォーマット指定はおそらく無駄なので廃止
-  virtual bool GetVideo(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes)
+  virtual bool GetVideoFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes,
+                             uint64_t *timeStampUs)
   {
     return false;
   }
-  virtual bool GetAudio(uint8_t *frames, uint64_t frameCount, uint64_t *framesRead)
+  virtual bool GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
+                             uint64_t *timeStampUs)
   {
     return false;
   }

@@ -42,17 +42,16 @@ Decoder::Decoder(CodecId codecId, DecoderType type)
 , mPendingInputs(0)
 , mIsInpuEOS(false)
 {
-  // TODO 実測してみて決める
-  size_t qInSize  = 8;
-  size_t qOutSize = 8;
+  size_t qInSize  = 4;
+  size_t qOutSize = 4;
   switch (type) {
   case DECODER_TYPE_VIDEO:
-    qInSize  = 8;
-    qOutSize = 8;
+    qInSize  = 4;
+    qOutSize = 4;
     break;
   case DECODER_TYPE_AUDIO:
-    qInSize  = 32;
-    qOutSize = 32;
+    qInSize  = 16;
+    qOutSize = 16;
     break;
   default:
     ASSERT(false, "unknown decoder type: type=%d\n", type);

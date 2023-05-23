@@ -12,7 +12,7 @@ class MoviePlayerCore : public MessageLooper
 {
   // TODO test
   friend class AudioEngine;
-  
+
 public:
   enum Message
   {
@@ -76,7 +76,8 @@ public:
   // TODO A/V 考慮(現状はVideoデータ決め打ち対応)
   const DecodedBuffer *GetDecodedFrame() const;
 
-  bool GetAudio(uint8_t *frames, uint64_t frameCount, uint64_t *framesRead);
+  bool GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
+                     uint64_t *timeStampUs);
 
   // 入力をプリロードする
   void PreLoadInput();
@@ -87,12 +88,23 @@ protected:
   void SelectTargetTrack();
   void Start();
   void Decode(bool oneShot = false);
-  void HandleOutput(bool isPreloading);
-  void HandleInput(bool isPreloading);
+  void DemuxInput(bool isPreloading);
+  void HandleVideoOutput(bool isPreloading);
+  void HandleAudioOutput(bool isPreloading);
+  void Flush();
 
   void SetState(State newState);
   State GetState() const;
   void InitDummyFrame();
+
+#if 0 // TODO 構成変更作業用
+  void UpdateVideoFrame();
+  void SetVideoFrame(DecodedBuffer *newFrame);
+  void SetVideoFrameNext(DecodedBuffer *nextFrame)
+  void SetAudioFrame(DecodedBuffer *newFrame);
+#endif
+
+  // TODO DELETE
   void UpdateDecodedFrame(DecodedBuffer *newFrame);
   void UpdateDecodedFrameNext(DecodedBuffer *nextFrame);
 
@@ -129,6 +141,21 @@ private:
 
   // オーディオ
   AudioEngine *mAudioEngine;
+  std::mutex mAudioFrameMutex;
+  size_t mAudioQueuedBytes;
+  size_t mAudioDataPos;
+  int32_t mAudioUnitSize;
+  struct {
+    uint64_t base;  // 現在のフレーム先頭のPTS
+    uint64_t offset;  // 現在の詳細な時間はstartPts + offsetTimeになる
+  } mAudioTime;
+  std::queue<DecodedBuffer *> mAudioFrameQueue;
+  void EnqueueAudio(DecodedBuffer *buf)
+  {
+    std::lock_guard<std::mutex> lock(mAudioFrameMutex);
+    mAudioFrameQueue.push(buf);
+    mAudioQueuedBytes += buf->dataSize;
+  }
 
   // 同期用イベントフラグ
   enum

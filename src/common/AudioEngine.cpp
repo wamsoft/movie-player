@@ -97,15 +97,17 @@ static ma_data_source_vtable s_my_data_source_vtable = {
 // AudioEngine
 // -----------------------------------------------------------------------------
 AudioEngine::AudioEngine()
-: mDataPos(0)
-, mFrameSize(0)
+: mPlayer(nullptr)
 {}
 
 AudioEngine::~AudioEngine() {}
 
 bool
-AudioEngine::Init(AudioFormat format, int32_t channels, int32_t sampleRate)
+AudioEngine::Init(MoviePlayerCore *player, AudioFormat format, int32_t channels,
+                  int32_t sampleRate)
 {
+  mPlayer = player;
+
   ma_log_callback_init(my_ma_logger, NULL);
 
   // エンジン初期化
@@ -119,16 +121,13 @@ AudioEngine::Init(AudioFormat format, int32_t channels, int32_t sampleRate)
   ma_format mf = ma_format_unknown;
   switch (format) {
   case AUDIO_FORMAT_U8:
-    mf         = ma_format_u8;
-    mFrameSize = channels * 1;
+    mf = ma_format_u8;
     break;
   case AUDIO_FORMAT_S16:
-    mf         = ma_format_s16;
-    mFrameSize = channels * 2;
+    mf = ma_format_s16;
     break;
   case AUDIO_FORMAT_F32:
-    mf         = ma_format_f32;
-    mFrameSize = channels * 4;
+    mf = ma_format_f32;
     break;
   default:
     ASSERT(false, "Unknown audio format: format=%d\n", format);
@@ -159,13 +158,7 @@ AudioEngine::Init(AudioFormat format, int32_t channels, int32_t sampleRate)
   mVolume = ma_sound_get_volume(&mSound);
   LOGV("initial sound volume: %f\n", mVolume);
 
-  // ステート初期化
-  mDataPos = 0;
-
   LOGV("miniaudio engine initialized!\n");
-  
-  // TODO test
-  mPlayer = nullptr;
 
   return true;
 }
@@ -217,85 +210,20 @@ AudioEngine::Volume() const
   return mVolume;
 }
 
-void
-AudioEngine::Enqueue(void *data, size_t size, bool last, int64_t ptsNs)
-{
-  std::lock_guard<std::mutex> lock(mDataMutex);
-
-  mDataQueue.push(DataBuffer(data, size, last, ptsNs));
-  LOGV("enqueue audio buffer: size=%llu, count=%llu, time=%lld\n", size, mDataQueue.size(), ptsNs);
-}
-
-void
-AudioEngine::ClearQueue()
-{
-  std::lock_guard<std::mutex> lock(mDataMutex);
-
-  mDataQueue = {};
-}
-
 ma_result
 AudioEngine::ReadData(void *pFramesOut, ma_uint64 frameCount, ma_uint64 *pFramesRead)
 {
-  std::lock_guard<std::mutex> lock(mDataMutex);
+  bool updated         = false;
+  ma_uint64 framesRead = 0;
 
-  int64_t mediaTimeNs = INT64_MAX;
-
-  uint8_t *dst    = (uint8_t *)pFramesOut;
-  ma_uint64 size  = frameCount * mFrameSize;
-  ma_uint64 count = 0;
-  bool last       = false;
-
-  while (!last && size > 0 && mDataQueue.size() > 0) {
-    const DataBuffer &data = mDataQueue.front();
-  
-    // TODO test
-    if (mediaTimeNs == INT64_MAX) {
-      mediaTimeNs = data.timeStampNs;
-    }
-
-    int remain             = data.size - mDataPos;
-    if (size < remain) {
-      memcpy(dst, (uint8_t *)data.data + mDataPos, size);
-      dst += size;
-      count += (size / mFrameSize);
-      mDataPos += size;
-      size = 0;
-    } else {
-      memcpy(dst, (uint8_t *)data.data + mDataPos, remain);
-      if (data.last) {
-        last = true;
-      }
-      mDataQueue.pop();
-      dst += remain;
-      count += (remain / mFrameSize);
-      mDataPos = 0;
-      size -= remain;
-    }
-  }
-
-  ma_result result = last ? MA_AT_END : MA_SUCCESS;
-
-  // デコードが間に合っていない場合の処理
-  if (!last && count < frameCount) {
-    // デコードが間に合っていない場合はBUSYを返す
-    result = MA_BUSY;
+  if (mPlayer) {
+    updated =
+      mPlayer->GetAudioFrame((uint8_t *)pFramesOut, frameCount, &framesRead, nullptr);
   }
 
   if (pFramesRead) {
-    *pFramesRead = count;
-  }
-  
-  // TODO test
-  if (mPlayer && mediaTimeNs != INT64_MAX) {
-    int64_t mediaTime = ns_to_us(mediaTimeNs);
-    LOGV("size=%lld/%lld, time=%lld\n", count, frameCount, mediaTime);
-    // TODO 先頭のカウンタ＋送出サンプル数から計算したカウンタ
-    mPlayer->mTimer.SetCurrentMediaTime(mediaTime);
-    if (!mPlayer->mTimer.IsStarted()) {
-      mPlayer->mTimer.SetStartMediaTime(mediaTime);
-    }
+    *pFramesRead = framesRead;
   }
 
-  return result;
+  return updated ? MA_SUCCESS : MA_BUSY;
 }

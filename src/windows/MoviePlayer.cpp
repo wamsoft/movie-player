@@ -354,6 +354,21 @@ MoviePlayer::RenderFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes
   }
 }
 
+// TODO WIP
+bool
+MoviePlayer::GetVideoFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes,
+                           uint64_t *timeStampUs)
+{
+  return true;
+}
+
+bool
+MoviePlayer::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
+                           uint64_t *timeStampUs)
+{
+  return true;
+}
+
 IMoviePlayer *
 IMoviePlayer::CreateMoviePlayer(const char *filename, ColorFormat format)
 {

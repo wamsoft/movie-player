@@ -8,6 +8,8 @@
 
 #include "miniaudio.h"
 
+class MoviePlayerCore;
+
 class AudioEngine;
 struct my_data_source
 {
@@ -24,7 +26,8 @@ public:
   AudioEngine();
   ~AudioEngine();
 
-  bool Init(AudioFormat format, int32_t channels, int32_t sampleRate);
+  bool Init(MoviePlayerCore *player, AudioFormat format, int32_t channels,
+            int32_t sampleRate);
   void Done();
 
   void Start();
@@ -33,40 +36,14 @@ public:
   void SetVolume(float vol);
   float Volume() const;
 
-  void Enqueue(void *data, size_t size, bool last, int64_t ptsNs);
-  void ClearQueue();
-
   ma_result ReadData(void *pFramesOut, ma_uint64 frameCount, ma_uint64 *pFramesRead);
-
-  // TODO test
-  class MoviePlayerCore *mPlayer;
 
 private:
   float mVolume;
   ma_sound mSound;
   ma_engine mEngine;
   my_data_source mSource;
-
-  struct DataBuffer
-  {
-    uint8_t *data;
-    std::vector<uint8_t> buf;
-    size_t size;
-    bool last;
-    int64_t timeStampNs;
-    DataBuffer(void *d, size_t size, bool last, int64_t ptsNs)
-    : size(size)
-    , last(last)
-    , timeStampNs(ptsNs)
-    {
-      buf.resize(size);
-      memcpy(buf.data(), d, size);
-      data = buf.data();
-    }
-  };
-
-  std::queue<DataBuffer> mDataQueue;
-  std::mutex mDataMutex;
-  off_t mDataPos;
   int32_t mFrameSize;
+
+  MoviePlayerCore *mPlayer;
 };
