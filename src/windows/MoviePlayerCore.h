@@ -10,9 +10,6 @@ class AudioEngine;
 
 class MoviePlayerCore : public MessageLooper
 {
-  // TODO test
-  friend class AudioEngine;
-
 public:
   enum Message
   {
@@ -109,9 +106,6 @@ protected:
   // TODO DELETE
   void UpdateDecodedFrame(DecodedBuffer *newFrame);
   void UpdateDecodedFrameNext(DecodedBuffer *nextFrame);
-
-  // TODO Audio対応したので、Video決め打ちになってる名前(UpdateDecodedFrameとか)を
-  //      一通りどうするか見直すこと
 
 private:
   // ステート

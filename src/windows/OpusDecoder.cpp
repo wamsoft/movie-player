@@ -80,13 +80,6 @@ OpusAudioDecoder::DecodeFrame(DecodedBuffer *dcBuf, FramePacket *packet)
   tm.stop();
 #endif
 
-  // TODO これらはデコーダ投入前に決定できるので外部で埋めて置くので良いのでは？
-  // TODO というかAudioはFrame単位ではないはずなのでDecoder::DecodePacket()に
-  //      変更したほうがいいかも。
-  //      Decoder::mDecodedFramesはAudioには無効だし
-  //      DecodedBuffer::frameもAudioには無効なので、必要ならDecoder::vに
-  //      移動させるか、使ってなさそうなら削除してしまうかで良さそう。
-  //      とりあえず fame == packets の意味で埋めておく。
   dcBuf->frame       = mDecodedFrames++;
   dcBuf->timeStampNs = packet->timeStampNs;
 

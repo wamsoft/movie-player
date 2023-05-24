@@ -16,6 +16,14 @@ public:
   {}
   ~MediaClock() {}
 
+  void Reset()
+  {
+    std::lock_guard<std::mutex> lock(mLock);
+
+    mStartMediaTimeUs  = -1;
+    mStartSystemTimeUs = -1;
+  }
+
   void SetDuration(int64_t mediaDurationUs)
   {
     std::lock_guard<std::mutex> lock(mLock);
@@ -126,38 +134,6 @@ public:
     return is_started();
   }
 
-  int64_t ConvMediaToSystem(int64_t mediaTimeUs)
-  {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    if (!is_started()) {
-      INLINE_LOGV("BUG?: ConvMediaToSystem(): start time is not set.\n");
-      return -1;
-    }
-
-    return mStartSystemTimeUs + mediaTimeUs;
-  }
-
-  int64_t ConvSystemToMedia(int64_t systemTimeUs)
-  {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    if (!is_started()) {
-      INLINE_LOGV("BUG?: ConvSystemToMedia(): start time is not set.\n");
-      return -1;
-    }
-
-    // mediaのstart<->duration区間を越えた時間はクリップしておく
-    int64_t mediaUs = (systemTimeUs - mStartSystemTimeUs) + mStartMediaTimeUs;
-    if (mediaUs > mDurationUs) {
-      mediaUs = mDurationUs;
-    } else if (mediaUs < mStartMediaTimeUs) {
-      mediaUs = mStartMediaTimeUs;
-    }
-
-    return mediaUs;
-  }
-
   void SetCurrentMediaTime(int64_t currentMediaTimeUS)
   {
     std::lock_guard<std::mutex> lock(mLock);
@@ -174,15 +150,7 @@ public:
 
   int64_t GetCurrentSystemTime() const { return get_time_us(); }
 
-#if 1 // TODO OBSOLETE
-  void ClearStartTime()
-  {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    mStartMediaTimeUs  = -1;
-    mStartSystemTimeUs = -1;
-  }
-
+#if 0 // TODO OBSOLETE
   int64_t CalcDelay(int64_t mediaTimeUs, int64_t nowUs = -1)
   {
     std::lock_guard<std::mutex> lock(mLock);

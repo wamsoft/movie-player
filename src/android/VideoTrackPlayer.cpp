@@ -263,7 +263,7 @@ VideoTrackPlayer::HandleMessage(int32_t what, int64_t arg, void *obj)
 
   case MSG_RESUME:
     if (GetState() == STATE_PAUSE) {
-      mClock->ClearStartTime();
+      mClock->Reset();
       SetState(STATE_PLAY);
       Decode();
     }
@@ -274,7 +274,7 @@ VideoTrackPlayer::HandleMessage(int32_t what, int64_t arg, void *obj)
     AMediaExtractor_seekTo(mExtractor, arg, AMEDIAEXTRACTOR_SEEK_NEXT_SYNC);
     AMediaCodec_flush(mCodec);
     // TODO starttimeをV/A共通にしてるので、同期処理していない現状ではおかしくなるかも？
-    mClock->ClearStartTime();
+    mClock->Reset();
     mSawInputEOS  = false;
     mSawOutputEOS = false;
     if (GetState() != STATE_PLAY) {

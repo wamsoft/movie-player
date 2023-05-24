@@ -30,7 +30,7 @@ MoviePlayerCore::Init()
   mVideoDecoder = nullptr;
   mAudioDecoder = nullptr;
 
-  mClock.ClearStartTime();
+  mClock.Reset();
 
   mDecodedFrame = mDecodedFrameNext = nullptr;
   mDummyFrame.InitByType(TRACK_TYPE_VIDEO, -1);
@@ -49,8 +49,7 @@ MoviePlayerCore::InitDummyFrame()
     mDummyFrame.InitByType(TRACK_TYPE_VIDEO, -1);
     mDummyFrame.Resize(mWidth * mHeight * 4);
     mDummyFrame.timeStampNs = 0;
-    mDummyFrame.frame =
-      0; // TODO -1だと無効フレーム扱いなので、ダミーフラグを付けるかなんか考える
+    mDummyFrame.frame       = 0;
     memset(mDummyFrame.data, 0xff, mDummyFrame.capacity);
     {
       std::lock_guard<std::mutex> lock(mDecodedFrameMutex);
@@ -684,7 +683,7 @@ MoviePlayerCore::Flush()
     mAudioDecoder->FlushSync();
   }
 
-  mClock.ClearStartTime();
+  mClock.Reset();
 
   mSawInputEOS  = false;
   mSawOutputEOS = false;
