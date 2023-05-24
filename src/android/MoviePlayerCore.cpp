@@ -3,7 +3,7 @@
 
 #include "Constants.h"
 #include "CommonUtils.h"
-#include "MediaTimer.h"
+#include "MediaClock.h"
 #include "VideoTrackPlayer.h"
 #include "AudioTrackPlayer.h"
 #include "MoviePlayerCore.h"
@@ -154,7 +154,7 @@ MoviePlayerCore::SetupVideoTrackPlayer(AMediaExtractor *ex)
       AMediaExtractor_delete(ex);
       return false;
     } else if (!strncmp(mime, "video/", 6)) {
-      mVideoTrackPlayer = new VideoTrackPlayer(ex, i, &mTimer);
+      mVideoTrackPlayer = new VideoTrackPlayer(ex, i, &mClock);
       AMediaFormat_delete(format);
       return true;
     } else {
@@ -181,7 +181,7 @@ MoviePlayerCore::SetupAudioTrackPlayer(AMediaExtractor *ex)
       AMediaExtractor_delete(ex);
       return false;
     } else if (!strncmp(mime, "audio/", 6)) {
-      mAudioTrackPlayer = new AudioTrackPlayer(ex, i, &mTimer);
+      mAudioTrackPlayer = new AudioTrackPlayer(ex, i, &mClock);
       AMediaFormat_delete(format);
       // 流れ的にはOpen()した後にオーディオフォーマットを確認してからなので
       // まだ未設定のはずだが一応ハンドラ設定を確認
@@ -377,13 +377,13 @@ MoviePlayerCore::Encoding() const
 int64_t
 MoviePlayerCore::Duration() const
 {
-  return mTimer.GetDuration();
+  return mClock.GetDuration();
 }
 
 int64_t
 MoviePlayerCore::Position() const
 {
-  return mTimer.GetCurrentMediaTime();
+  return mClock.GetCurrentMediaTime();
 }
 
 bool

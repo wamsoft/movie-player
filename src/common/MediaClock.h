@@ -6,15 +6,15 @@
 #include <chrono>
 #include <mutex>
 
-class MediaTimer
+class MediaClock
 {
 public:
-  MediaTimer()
+  MediaClock()
   : mDurationUs(-1)
   , mStartMediaTimeUs(-1)
   , mStartSystemTimeUs(-1)
   {}
-  ~MediaTimer() {}
+  ~MediaClock() {}
 
   void SetDuration(int64_t mediaDurationUs)
   {

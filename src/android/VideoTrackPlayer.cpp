@@ -141,7 +141,7 @@ DecodedFrame::IsValid()
 // ビデオトラックプレイヤ
 // -----------------------------------------------------------------------------
 VideoTrackPlayer::VideoTrackPlayer(AMediaExtractor *ex, int32_t trackIndex,
-                                   MediaTimer *timer)
+                                   MediaClock *timer)
 : TrackPlayer(ex, trackIndex, timer)
 {
   Init();
@@ -160,8 +160,8 @@ VideoTrackPlayer::VideoTrackPlayer(AMediaExtractor *ex, int32_t trackIndex,
 
   // 現在のメディアタイマーにセットされているDurationよりも長い場合は
   // それをムービー全体のDurationとして反映する
-  if (mDuration > mTimer->GetDuration()) {
-    mTimer->SetDuration(mDuration);
+  if (mDuration > mClock->GetDuration()) {
+    mClock->SetDuration(mDuration);
   }
 
   // コーデックセットアップ
@@ -263,7 +263,7 @@ VideoTrackPlayer::HandleMessage(int32_t what, int64_t arg, void *obj)
 
   case MSG_RESUME:
     if (GetState() == STATE_PAUSE) {
-      mTimer->ClearStartTime();
+      mClock->ClearStartTime();
       SetState(STATE_PLAY);
       Decode();
     }
@@ -274,7 +274,7 @@ VideoTrackPlayer::HandleMessage(int32_t what, int64_t arg, void *obj)
     AMediaExtractor_seekTo(mExtractor, arg, AMEDIAEXTRACTOR_SEEK_NEXT_SYNC);
     AMediaCodec_flush(mCodec);
     // TODO starttimeをV/A共通にしてるので、同期処理していない現状ではおかしくなるかも？
-    mTimer->ClearStartTime();
+    mClock->ClearStartTime();
     mSawInputEOS  = false;
     mSawOutputEOS = false;
     if (GetState() != STATE_PLAY) {
@@ -311,13 +311,13 @@ VideoTrackPlayer::HandleOutputData(ssize_t bufIdx, AMediaCodecBufferInfo &bufInf
 
     // このフレームのPTSをタイマーに反映
     int64_t mediaTimeUs = bufInfo.presentationTimeUs;
-    if (!mTimer->IsStarted()) {
-      mTimer->SetStartTime(mediaTimeUs);
+    if (!mClock->IsStarted()) {
+      mClock->SetStartTime(mediaTimeUs);
     }
-    mTimer->SetCurrentMediaTime(mediaTimeUs);
+    mClock->SetCurrentMediaTime(mediaTimeUs);
 
     // PTSが未来の場合はRenderedFrameへの反映を待ち合わせる
-    int64_t renderDelay = mTimer->CalcDelay(mediaTimeUs);
+    int64_t renderDelay = mClock->CalcDelay(mediaTimeUs);
     if (renderDelay > 0) {
       // LOGV("render delay sleep: %lld us \n", renderDelay);
       std::this_thread::sleep_for(std::chrono::microseconds(renderDelay));

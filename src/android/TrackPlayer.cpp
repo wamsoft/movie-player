@@ -5,12 +5,12 @@
 #include "Constants.h"
 #include "TrackPlayer.h"
 
-TrackPlayer::TrackPlayer(AMediaExtractor *ex, int32_t trackIndex, MediaTimer *timer)
+TrackPlayer::TrackPlayer(AMediaExtractor *ex, int32_t trackIndex, MediaClock *timer)
 : mExtractor(ex)
 , mCodec(nullptr)
 , mTrackIndex(trackIndex)
 , mState(STATE_UNINIT)
-, mTimer(timer)
+, mClock(timer)
 {
   Init();
 }
@@ -18,7 +18,7 @@ TrackPlayer::TrackPlayer(AMediaExtractor *ex, int32_t trackIndex, MediaTimer *ti
 TrackPlayer::~TrackPlayer()
 {
   Done();
-  mTimer = nullptr;
+  mClock = nullptr;
 }
 
 void
@@ -48,7 +48,7 @@ TrackPlayer::Done()
 
   SetState(STATE_FINISH);
   ClearAllEvent();
-  mTimer = nullptr;
+  mClock = nullptr;
 }
 
 void
@@ -210,7 +210,7 @@ TrackPlayer::Decode(int32_t flags)
   bool isDecodeCompleted = mSawInputEOS && mSawOutputEOS;
   if (isDecodeCompleted) {
     // 最後のフレームは(Duration-現フレームPTS)分だけ残す
-    int64_t postDelay = mTimer->GetDuration() - mTimer->GetCurrentMediaTime();
+    int64_t postDelay = mClock->GetDuration() - mClock->GetCurrentMediaTime();
     std::this_thread::sleep_for(std::chrono::microseconds(postDelay));
     // LOGV("render post delay sleep: %lld us \n", postDelay);
     if (mIsLoop) {

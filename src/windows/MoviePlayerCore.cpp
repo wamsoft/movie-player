@@ -30,7 +30,7 @@ MoviePlayerCore::Init()
   mVideoDecoder = nullptr;
   mAudioDecoder = nullptr;
 
-  mTimer.ClearStartTime();
+  mClock.ClearStartTime();
 
   mDecodedFrame = mDecodedFrameNext = nullptr;
   mDummyFrame.InitByType(TRACK_TYPE_VIDEO, -1);
@@ -234,7 +234,7 @@ MoviePlayerCore::Duration() const
 {
   std::lock_guard<std::mutex> lock(mApiMutex);
 
-  return mTimer.GetDuration();
+  return mClock.GetDuration();
 }
 
 int64_t
@@ -242,7 +242,7 @@ MoviePlayerCore::Position() const
 {
   std::lock_guard<std::mutex> lock(mApiMutex);
 
-  return mTimer.GetCurrentMediaTime();
+  return mClock.GetCurrentMediaTime();
 }
 
 bool
@@ -391,7 +391,7 @@ MoviePlayerCore::Open(const char *filepath)
     return false;
   }
 
-  mTimer.SetDuration(mExtractor->GetDurationUs());
+  mClock.SetDuration(mExtractor->GetDurationUs());
 
   SelectTargetTrack();
   Start();
@@ -487,11 +487,11 @@ MoviePlayerCore::HandleVideoOutput()
         UpdateDecodedFrame(nullptr);
         isFirstOfPreload = false;
         isFrameReady     = true;
-      } else if (mTimer.IsStarted()) {
+      } else if (mClock.IsStarted()) {
         if (IsAudioAvailable()) {
-          timeDiff = mTimer.CalcDiffFromMediaTime(nextTimeUs);
+          timeDiff = mClock.CalcDiffFromMediaTime(nextTimeUs);
         } else {
-          timeDiff = mTimer.CalcDiffFromSystemTime(nextTimeUs);
+          timeDiff = mClock.CalcDiffFromSystemTime(nextTimeUs);
         }
         // LOGV("frame diff time=%lld\n", timeDiff);
         // TODO フレームスキップ
@@ -562,7 +562,7 @@ MoviePlayerCore::Decode()
 
 #if 0 // TODO sleepではなくてyiedして空ループで消化する感じで
     // 最後のフレームは(Duration-現フレームPTS)分だけ残す
-    int64_t postDelay = mTimer.GetDuration() - mTimer.GetCurrentMediaTime();
+    int64_t postDelay = mClock.GetDuration() - mClock.GetCurrentMediaTime();
     // LOGV("render post delay sleep: %lld us \n", postDelay);
     std::this_thread::sleep_for(std::chrono::microseconds(postDelay));
 #endif
@@ -684,7 +684,7 @@ MoviePlayerCore::Flush()
     mAudioDecoder->FlushSync();
   }
 
-  mTimer.ClearStartTime();
+  mClock.ClearStartTime();
 
   mSawInputEOS  = false;
   mSawOutputEOS = false;
@@ -713,9 +713,9 @@ MoviePlayerCore::UpdateDecodedFrame(DecodedBuffer *newFrame)
     // Audioトラックがない場合は、メディアタイマーをビデオフレームのPTSで更新
     if (!IsAudioAvailable() && newFrame != &mDummyFrame) {
       int64_t mediaTimeNs = ns_to_us(mDecodedFrame->timeStampNs);
-      mTimer.SetCurrentMediaTime(ns_to_us(mediaTimeNs));
-      if (!mTimer.IsStarted()) {
-        mTimer.SetStartTime(mediaTimeNs);
+      mClock.SetCurrentMediaTime(ns_to_us(mediaTimeNs));
+      if (!mClock.IsStarted()) {
+        mClock.SetStartTime(mediaTimeNs);
       }
     }
   }
@@ -816,9 +816,9 @@ MoviePlayerCore::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *fr
     // LOGV("readed: %lld, pos: %lld\n", reqBytes, pos);
 
     mediaTime = ns_to_us(timeBase + timeOffset);
-    mTimer.SetCurrentMediaTime(mediaTime);
-    if (!mTimer.IsStarted()) {
-      mTimer.SetStartTime(mediaTime);
+    mClock.SetCurrentMediaTime(mediaTime);
+    if (!mClock.IsStarted()) {
+      mClock.SetStartTime(mediaTime);
     }
 
     mAudioTime.base = nextTimeBase;
@@ -863,7 +863,7 @@ MoviePlayerCore::SetState(State newState)
   if (mAudioEngine) {
     switch (newState) {
     case STATE_PLAY:
-      // mTimer.SetStartTime();
+      // mClock.SetStartTime();
       mAudioEngine->Start();
       break;
     case STATE_PAUSE:

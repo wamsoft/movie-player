@@ -2,7 +2,7 @@
 
 #include "VideoTrackPlayer.h"
 #include "AudioTrackPlayer.h"
-#include "MediaTimer.h"
+#include "MediaClock.h"
 
 #include "media/NdkMediaExtractor.h"
 
@@ -68,7 +68,7 @@ private:
   VideoTrackPlayer *mVideoTrackPlayer;
   AudioTrackPlayer *mAudioTrackPlayer;
 
-  MediaTimer mTimer;
+  MediaClock mClock;
 
   int mFd;
 

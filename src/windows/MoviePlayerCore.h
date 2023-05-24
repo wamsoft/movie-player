@@ -4,7 +4,7 @@
 #include "MessageLooper.h"
 #include "WebmExtractor.h"
 #include "Decoder.h"
-#include "MediaTimer.h"
+#include "MediaClock.h"
 
 class AudioEngine;
 
@@ -134,7 +134,7 @@ private:
   bool mSawOutputEOS;
 
   // メディアタイマー
-  MediaTimer mTimer;
+  MediaClock mClock;
 
   // デコード済みフレーム
   mutable std::mutex mDecodedFrameMutex;
