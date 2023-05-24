@@ -121,13 +121,17 @@ AudioEngine::Init(MoviePlayerCore *player, AudioFormat format, int32_t channels,
   ma_format mf = ma_format_unknown;
   switch (format) {
   case AUDIO_FORMAT_U8:
-    mf = ma_format_u8;
+    mf         = ma_format_u8;
+    mFrameSize = channels;
     break;
   case AUDIO_FORMAT_S16:
-    mf = ma_format_s16;
+    mf         = ma_format_s16;
+    mFrameSize = channels * 2;
     break;
+  case AUDIO_FORMAT_S32:
   case AUDIO_FORMAT_F32:
-    mf = ma_format_f32;
+    mf         = ma_format_f32;
+    mFrameSize = channels * 4;
     break;
   default:
     ASSERT(false, "Unknown audio format: format=%d\n", format);
@@ -215,11 +219,21 @@ AudioEngine::ReadData(void *pFramesOut, ma_uint64 frameCount, ma_uint64 *pFrames
 {
   bool updated         = false;
   ma_uint64 framesRead = 0;
+  size_t bytesToRead   = frameCount * mFrameSize;
 
   if (mPlayer) {
     updated =
       mPlayer->GetAudioFrame((uint8_t *)pFramesOut, frameCount, &framesRead, nullptr);
   }
+
+#if 0
+  // BUSYで止めずにゼロフィルした音声を送る場合
+  if (!updated) {
+    memset(pFramesOut, 0, bytesToRead);
+    framesRead = frameCount;
+    updated    = true;
+  }
+#endif
 
   if (pFramesRead) {
     *pFramesRead = framesRead;

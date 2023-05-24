@@ -39,7 +39,7 @@ MoviePlayerCore::Init()
   mAudioQueuedBytes = 0;
   mAudioDataPos     = 0;
   mAudioUnitSize    = 0;
-  mAudioTime        = { 0 };
+  mAudioTime.Reset();
 }
 
 void
@@ -486,13 +486,14 @@ MoviePlayerCore::HandleVideoOutput(bool isPreloading)
         isFirstOfPreload = false;
         isFrameReady     = true;
       } else if (mTimer.IsStarted()) {
-        timeDiff = mTimer.CalcDiffFromMediaTime(nextTimeUs);
-        timeDiff = mTimer.CalcDiffFromSystemTime(nextTimeUs); // TODO test
+        if (IsAudioAvailable()) {
+          timeDiff = mTimer.CalcDiffFromMediaTime(nextTimeUs);
+        } else {
+          timeDiff = mTimer.CalcDiffFromSystemTime(nextTimeUs);          
+        }
         // LOGV("frame diff time=%lld\n", timeDiff);
-
         // TODO フレームスキップ
         // UpdateDecodedFrameNext(nullptr);
-
         if (timeDiff >= 0) {
           UpdateDecodedFrame(nullptr);
           isFrameReady = true;
@@ -570,6 +571,7 @@ MoviePlayerCore::Decode(bool oneShot)
     if (mIsLoop) {
       LOGV("---- Loop ----\n");
       Post(MSG_SEEK, 0);
+      // Post(MSG_PRELOAD);
       Post(MSG_DECODE);
     } else {
       Post(MSG_STOP);
@@ -624,10 +626,6 @@ MoviePlayerCore::HandleMessage(int32_t what, int64_t arg, void *data)
   case MSG_SEEK:
     Flush();
     mExtractor->SeekTo(arg);
-    mTimer.ClearStartTime();
-    mSawInputEOS  = false;
-    mSawOutputEOS = false;
-    // シーク動作のためにプリロード相当の処理をする
     Decode(true);
     break;
 
@@ -663,7 +661,7 @@ MoviePlayerCore::Flush()
   UpdateDecodedFrame(&mDummyFrame);
   UpdateDecodedFrameNext(nullptr);
 
-  // オーディオ出力待ちキューをフラッシュ
+  // オーディオ出力待ちキューをフラッシュ＆ステータス類をリセット
   if (mAudioDecoder != nullptr) {
     std::lock_guard<std::mutex> lock(mAudioFrameMutex);
     while (!mAudioFrameQueue.empty()) {
@@ -671,6 +669,9 @@ MoviePlayerCore::Flush()
       mAudioFrameQueue.pop();
       mAudioDecoder->ReleaseDecodedBufferIndex(buf->bufIndex);
     }
+    mAudioQueuedBytes = 0;
+    mAudioDataPos     = 0;
+    mAudioTime.Reset();
   }
 
   // デコーダ類をフラッシュ
@@ -680,6 +681,11 @@ MoviePlayerCore::Flush()
   if (mAudioDecoder != nullptr) {
     mAudioDecoder->FlushSync();
   }
+
+  mTimer.ClearStartTime();
+
+  mSawInputEOS  = false;
+  mSawOutputEOS = false;
 }
 
 void
@@ -745,6 +751,13 @@ MoviePlayerCore::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *fr
   uint64_t readFrames = 0;
   uint64_t mediaTime  = 0;
 
+  // プリロード中は出力を行わない
+  if (GetState() == STATE_PRELOADING) {
+    readFrames  = 0;
+    hasNewFrame = false;
+    goto out;
+  }
+
   if (IsAudioAvailable()) {
     std::lock_guard<std::mutex> lock(mAudioFrameMutex);
 
@@ -757,36 +770,34 @@ MoviePlayerCore::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *fr
     }
 
     uint8_t *dst          = frames;
-    uint64_t sizeToRead   = reqBytes;
+    uint64_t bytesToRead  = reqBytes;
     uint64_t timeBase     = mAudioTime.base;
     uint64_t timeOffset   = mAudioTime.offset;
     uint64_t nextTimeBase = 0;
 
-    bool firstEntry = true;
-    while (sizeToRead > 0 && mAudioFrameQueue.size() > 0) {
+    bool first = true;
+    while (bytesToRead > 0 && mAudioFrameQueue.size() > 0) {
       const DecodedBuffer *data = mAudioFrameQueue.front();
 
-      if (firstEntry) {
-        // 前回のバッファがちょうど使い切って終わった場合に、
-        // ベースタイムは前回のバッファのものを指しているが、
-        // 実際は新しいバッファのもので始まる、かつ新しいバッファの
-        // PTSが前回のバッファとは違う場合のケースをケアする。
-        // 状況的に、かならずオフセットは先頭から始まる。
+      if (first) {
+        // case1 前回がバッファをちょうど使い切って今回新バッファから
+        // case2 seekで飛んだ
+        // どちらにしても状況的にオフセットは先頭から始まるので常に0。
         if (timeBase != data->timeStampNs) {
           timeBase   = data->timeStampNs;
           timeOffset = 0;
         }
-        firstEntry = false;
+        first = false;
       }
       nextTimeBase = data->timeStampNs;
 
       int remain = data->dataSize - mAudioDataPos;
-      if (sizeToRead < remain) {
-        memcpy(dst, data->data + mAudioDataPos, sizeToRead);
-        dst += sizeToRead;
-        readFrames += (sizeToRead / mAudioUnitSize);
-        mAudioDataPos += sizeToRead;
-        sizeToRead = 0;
+      if (bytesToRead < remain) {
+        memcpy(dst, data->data + mAudioDataPos, bytesToRead);
+        dst += bytesToRead;
+        readFrames += (bytesToRead / mAudioUnitSize);
+        mAudioDataPos += bytesToRead;
+        bytesToRead = 0;
       } else {
         memcpy(dst, data->data + mAudioDataPos, remain);
         mAudioFrameQueue.pop();
@@ -794,17 +805,18 @@ MoviePlayerCore::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *fr
         dst += remain;
         readFrames += (remain / mAudioUnitSize);
         mAudioDataPos = 0;
-        sizeToRead -= remain;
+        bytesToRead -= remain;
       }
     }
     mAudioQueuedBytes -= reqBytes;
+    hasNewFrame = true;
 
     // LOGV("readed: %lld, pos: %lld\n", reqBytes, pos);
 
     mediaTime = ns_to_us(timeBase + timeOffset);
     mTimer.SetCurrentMediaTime(mediaTime);
     if (!mTimer.IsStarted()) {
-      mTimer.SetStartMediaTime(mediaTime);
+      mTimer.SetStartTime(mediaTime);
     }
 
     mAudioTime.base = nextTimeBase;
@@ -849,7 +861,7 @@ MoviePlayerCore::SetState(State newState)
   if (mAudioEngine) {
     switch (newState) {
     case STATE_PLAY:
-      mTimer.SetStartTime();
+      // mTimer.SetStartTime();
       mAudioEngine->Start();
       break;
     case STATE_PAUSE:

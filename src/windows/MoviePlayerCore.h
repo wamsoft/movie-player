@@ -145,9 +145,11 @@ private:
   size_t mAudioQueuedBytes;
   size_t mAudioDataPos;
   int32_t mAudioUnitSize;
-  struct {
-    uint64_t base;  // 現在のフレーム先頭のPTS
-    uint64_t offset;  // 現在の詳細な時間はstartPts + offsetTimeになる
+  struct
+  {
+    uint64_t base;   // 現在のフレーム先頭のPTS
+    uint64_t offset; // 現在の詳細な時間はstartPts + offsetTimeになる
+    void Reset() { base = INT64_MAX, offset = 0; }
   } mAudioTime;
   std::queue<DecodedBuffer *> mAudioFrameQueue;
   void EnqueueAudio(DecodedBuffer *buf)
