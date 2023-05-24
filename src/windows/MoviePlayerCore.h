@@ -87,14 +87,16 @@ protected:
 
   void SelectTargetTrack();
   void Start();
-  void Decode(bool oneShot = false);
-  void DemuxInput(bool isPreloading);
-  void HandleVideoOutput(bool isPreloading);
-  void HandleAudioOutput(bool isPreloading);
+  void Decode();
+  void DemuxInput();
+  void HandleVideoOutput();
+  void HandleAudioOutput();
   void Flush();
 
   void SetState(State newState);
   State GetState() const;
+  bool CurrentStateIs(State state) const;
+
   void InitDummyFrame();
 
 #if 0 // TODO 構成変更作業用

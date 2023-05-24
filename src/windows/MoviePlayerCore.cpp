@@ -403,12 +403,13 @@ MoviePlayerCore::Open(const char *filepath)
 }
 
 void
-MoviePlayerCore::DemuxInput(bool isPreloading)
+MoviePlayerCore::DemuxInput()
 {
   if (mSawInputEOS) {
     return;
   }
 
+  bool isPreloading  = CurrentStateIs(STATE_PRELOADING);
   bool isInputFilled = false;
   bool reachedEOS    = false;
 
@@ -447,7 +448,7 @@ MoviePlayerCore::DemuxInput(bool isPreloading)
 }
 
 void
-MoviePlayerCore::HandleVideoOutput(bool isPreloading)
+MoviePlayerCore::HandleVideoOutput()
 {
   if (!mVideoDecoder) {
     return;
@@ -457,6 +458,7 @@ MoviePlayerCore::HandleVideoOutput(bool isPreloading)
     return;
   }
 
+  bool isPreloading     = CurrentStateIs(STATE_PRELOADING);
   bool isFrameReady     = false;
   bool isFirstOfPreload = isPreloading;
   int32_t dcBufIndex    = -1;
@@ -489,7 +491,7 @@ MoviePlayerCore::HandleVideoOutput(bool isPreloading)
         if (IsAudioAvailable()) {
           timeDiff = mTimer.CalcDiffFromMediaTime(nextTimeUs);
         } else {
-          timeDiff = mTimer.CalcDiffFromSystemTime(nextTimeUs);          
+          timeDiff = mTimer.CalcDiffFromSystemTime(nextTimeUs);
         }
         // LOGV("frame diff time=%lld\n", timeDiff);
         // TODO フレームスキップ
@@ -505,7 +507,7 @@ MoviePlayerCore::HandleVideoOutput(bool isPreloading)
 }
 
 void
-MoviePlayerCore::HandleAudioOutput(bool isPreloading)
+MoviePlayerCore::HandleAudioOutput()
 {
   if (!mAudioDecoder) {
     return;
@@ -515,9 +517,9 @@ MoviePlayerCore::HandleAudioOutput(bool isPreloading)
     return;
   }
 
-  bool isFrameReady     = false;
-  bool isFirstOfPreload = isPreloading;
-  int32_t dcBufIndex    = -1;
+  bool isPreloading  = CurrentStateIs(STATE_PRELOADING);
+  bool isFrameReady  = false;
+  int32_t dcBufIndex = -1;
 
   do {
     dcBufIndex = mAudioDecoder->DequeueDecodedBufferIndex();
@@ -535,16 +537,13 @@ MoviePlayerCore::HandleAudioOutput(bool isPreloading)
 }
 
 void
-MoviePlayerCore::Decode(bool oneShot)
+MoviePlayerCore::Decode()
 {
-  // プリロード制御
-  bool isPreloading = (GetState() == STATE_PRELOADING || oneShot);
+  DemuxInput();
+  HandleVideoOutput();
+  HandleAudioOutput();
 
-  DemuxInput(isPreloading);
-  HandleVideoOutput(isPreloading);
-  HandleAudioOutput(isPreloading);
-
-  if (isPreloading) {
+  if (CurrentStateIs(STATE_PRELOADING)) {
     return;
   }
 
@@ -623,11 +622,14 @@ MoviePlayerCore::HandleMessage(int32_t what, int64_t arg, void *data)
     mIsLoop = (arg != 0);
   } break;
 
-  case MSG_SEEK:
+  case MSG_SEEK: {
     Flush();
     mExtractor->SeekTo(arg);
-    Decode(true);
-    break;
+    State savedState = GetState();
+    SetState(STATE_PRELOADING);
+    Decode();
+    SetState(savedState);
+  } break;
 
   case MSG_STOP:
     UpdateDecodedFrame(&mDummyFrame);
@@ -883,4 +885,10 @@ MoviePlayerCore::GetState() const
   std::lock_guard<std::mutex> lock(mApiMutex);
 
   return mState;
+}
+
+bool
+MoviePlayerCore::CurrentStateIs(State state) const
+{
+  return GetState() == state;
 }
