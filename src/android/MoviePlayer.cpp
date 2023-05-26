@@ -100,7 +100,7 @@ MoviePlayer::Done()
 bool
 MoviePlayer::Open(const char *filepath)
 {
-  mPlayer = new MoviePlayerCore();
+  mPlayer = new MoviePlayerCore(mInit);
   mPlayer->SetPixelFormat(conv_color_format(mColorFormat));
   return mPlayer->Open(filepath);
 }
@@ -359,9 +359,9 @@ MoviePlayer::RenderFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes
 }
 
 IMoviePlayer *
-IMoviePlayer::CreateMoviePlayer(const char *filename, ColorFormat format)
+IMoviePlayer::CreateMoviePlayer(const char *filename, InitParam &param)
 {
-  MoviePlayer *player = new MoviePlayer();
+  MoviePlayer *player = new MoviePlayer(param);
   player->SetColorFormat(format);
   if (player->Open(filename)) {
     return player;

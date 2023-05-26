@@ -5,6 +5,7 @@
 #include "WebmExtractor.h"
 #include "Decoder.h"
 #include "MediaClock.h"
+#include "IMoviePlayer.h"
 
 class AudioEngine;
 
@@ -36,7 +37,7 @@ public:
   };
 
 public:
-  MoviePlayerCore();
+  MoviePlayerCore(PixelFormat pixelFormat, bool useAudioEngine);
   virtual ~MoviePlayerCore();
 
   void Init();
@@ -50,8 +51,6 @@ public:
   void Seek(int64_t posUs);
   void SetLoop(bool loop);
 
-  void SetPixelFormat(PixelFormat format);
-
   bool IsVideoAvailable() const;
   // width/heightはvideo trackをExtractorでselect後でないと値が入らないので注意
   // MoviePlayer的にはOpen()で必ずスキャン＋SelectTrackするので
@@ -59,6 +58,7 @@ public:
   int32_t Width() const;
   int32_t Height() const;
   float FrameRate() const;
+  PixelFormat OutputPixelFormat() const;
 
   bool IsAudioAvailable() const;
   int32_t SampleRate() const;
@@ -123,6 +123,7 @@ private:
   // video 情報
   int32_t mWidth, mHeight;
   float mFrameRate;
+  PixelFormat mOutputPixelFormat;
   PixelFormat mPixelFormat;
 
   // ストリームフラグ
@@ -138,6 +139,7 @@ private:
   DecodedBuffer *mDecodedFrame, *mDecodedFrameNext;
 
   // オーディオ
+  bool mUseAudioEngine;
   AudioEngine *mAudioEngine;
   std::mutex mAudioFrameMutex;
   size_t mAudioQueuedBytes;

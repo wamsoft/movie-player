@@ -61,7 +61,7 @@ VpxDecoder::Configure(const Config &conf)
          "config:rgbFormat must be rgb pixel format\n");
 
   if (mAlphaMode) {
-    //conf.vpx.rgbFormat = ;
+    // conf.vpx.rgbFormat = ;
     if (vpx_codec_dec_init(&mAlphaCodec, mIface, &conf.vpx.decCfg, mFlags)) {
       CodecErrorMessage("failed to configure vpx alpha decoder");
       mIsConfigured = false;
@@ -88,6 +88,17 @@ VpxDecoder::Done()
   return true;
 }
 
+PixelFormat
+VpxDecoder::OutputPixelFormat() const
+{
+  if (mRgbFormat == PIXEL_FORMAT_UNKNOWN) {
+    // VPxデコーダの生出力は常にI420
+    return PIXEL_FORMAT_I420;
+  } else {
+    return mRgbFormat;
+  }
+}
+
 bool
 VpxDecoder::DecodeFrame(DecodedBuffer *dcBuf, FramePacket *packet)
 {
@@ -112,7 +123,8 @@ VpxDecoder::DecodeFrame(DecodedBuffer *dcBuf, FramePacket *packet)
   }
 
   if (mAlphaMode && packet->adddataSize > 0) {
-    err = vpx_codec_decode(&mAlphaCodec, packet->adddata, packet->adddataSize, nullptr, deadline);
+    err = vpx_codec_decode(&mAlphaCodec, packet->adddata, packet->adddataSize, nullptr,
+                           deadline);
     if (err) {
       CodecErrorMessage("VPx: failed to decode frame");
       return false;
@@ -128,7 +140,7 @@ VpxDecoder::DecodeFrame(DecodedBuffer *dcBuf, FramePacket *packet)
   if (img != nullptr) {
     if (mAlphaMode) {
       vpx_codec_iter_t iter_alpha = nullptr;
-      vpx_image *img_alpha = vpx_codec_get_frame(&mAlphaCodec, &iter_alpha);
+      vpx_image *img_alpha        = vpx_codec_get_frame(&mAlphaCodec, &iter_alpha);
       CopyToDecodedBuffer(dcBuf, packet->timeStampNs, img, img_alpha);
     } else {
       CopyToDecodedBuffer(dcBuf, packet->timeStampNs, img);
@@ -140,7 +152,8 @@ VpxDecoder::DecodeFrame(DecodedBuffer *dcBuf, FramePacket *packet)
 }
 
 void
-VpxDecoder::CopyToDecodedBuffer(DecodedBuffer *dcBuf, uint64_t time, vpx_image *vpxImg, vpx_image *vpxImgAlpha)
+VpxDecoder::CopyToDecodedBuffer(DecodedBuffer *dcBuf, uint64_t time, vpx_image *vpxImg,
+                                vpx_image *vpxImgAlpha)
 {
   ASSERT(vpxImg != nullptr, "invalid image data.\n");
   ASSERT(dcBuf != nullptr, "invalid decoded buffer.\n");
@@ -160,11 +173,13 @@ VpxDecoder::CopyToDecodedBuffer(DecodedBuffer *dcBuf, uint64_t time, vpx_image *
   const uint8_t *yBuf   = vpxImg->planes[VPX_PLANE_Y];
   const uint8_t *uBuf   = vpxImg->planes[uIndex];
   const uint8_t *vBuf   = vpxImg->planes[vIndex];
-  const uint8_t *aBuf   = vpxImgAlpha ? vpxImgAlpha->planes[VPX_PLANE_Y] : vpxImg->planes[VPX_PLANE_ALPHA];
-  int32_t yStride       = vpxImg->stride[VPX_PLANE_Y];
-  int32_t uStride       = vpxImg->stride[uIndex];
-  int32_t vStride       = vpxImg->stride[vIndex];
-  int32_t aStride       = vpxImgAlpha ? vpxImgAlpha->stride[VPX_PLANE_Y] : vpxImg->stride[VPX_PLANE_ALPHA];
+  const uint8_t *aBuf =
+    vpxImgAlpha ? vpxImgAlpha->planes[VPX_PLANE_Y] : vpxImg->planes[VPX_PLANE_ALPHA];
+  int32_t yStride = vpxImg->stride[VPX_PLANE_Y];
+  int32_t uStride = vpxImg->stride[uIndex];
+  int32_t vStride = vpxImg->stride[vIndex];
+  int32_t aStride =
+    vpxImgAlpha ? vpxImgAlpha->stride[VPX_PLANE_Y] : vpxImg->stride[VPX_PLANE_ALPHA];
 
   // 一応想定外のケースをチェック
   ASSERT(uStride == vStride, "illegale u/v stride. unknown format?\n");
@@ -242,8 +257,9 @@ VpxDecoder::CopyToDecodedBuffer(DecodedBuffer *dcBuf, uint64_t time, vpx_image *
     dcBuf->v.planes[VDB_PLANE_A]      = nullptr;
 
     // 変換コピー
-    convert_yuv_to_rgb32(dcBuf->data, dstStride, mRgbFormat, yBuf, uBuf, vBuf, aBuf, yStride,
-                         uStride, aStride, width, height, srcFormat, colorSpace, colorRange);
+    convert_yuv_to_rgb32(dcBuf->data, dstStride, mRgbFormat, yBuf, uBuf, vBuf, aBuf,
+                         yStride, uStride, aStride, width, height, srcFormat, colorSpace,
+                         colorRange);
   } else {
     // YUVフォーマットのまま格納
     // ピクセルフォーマット

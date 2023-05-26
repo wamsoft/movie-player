@@ -298,6 +298,9 @@ public:
   virtual ~VideoDecoder() {}
 
   virtual DecoderType Type() const { return DECODER_TYPE_VIDEO; }
+
+  // デコーダの出力ピクセルフォーマット
+  virtual PixelFormat OutputPixelFormat() const = 0;
 };
 
 class AudioDecoder : public Decoder

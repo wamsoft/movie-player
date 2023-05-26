@@ -3,8 +3,10 @@
 #include "MoviePlayerCore.h"
 #include "AudioEngine.h"
 
-MoviePlayerCore::MoviePlayerCore()
+MoviePlayerCore::MoviePlayerCore(PixelFormat pixelFormat, bool useAudioEngine)
 : mState(STATE_UNINIT)
+, mPixelFormat(pixelFormat)
+, mUseAudioEngine(useAudioEngine)
 {
   Init();
 }
@@ -17,9 +19,9 @@ MoviePlayerCore::~MoviePlayerCore()
 void
 MoviePlayerCore::Init()
 {
-  mWidth       = -1;
-  mHeight      = -1;
-  mPixelFormat = PIXEL_FORMAT_UNKNOWN;
+  mWidth              = -1;
+  mHeight             = -1;
+  mOutputPixelFormat = PIXEL_FORMAT_UNKNOWN;
 
   mSawInputEOS  = false;
   mSawOutputEOS = false;
@@ -65,7 +67,7 @@ MoviePlayerCore::Done()
   Flush();
   StopThread();
 
-  if (mAudioEngine) {
+  if (mUseAudioEngine && mAudioEngine) {
     mAudioEngine->Stop();
     delete mAudioEngine;
     mAudioEngine = nullptr;
@@ -154,12 +156,6 @@ MoviePlayerCore::SetLoop(bool loop)
   }
 }
 
-void
-MoviePlayerCore::SetPixelFormat(PixelFormat format)
-{
-  mPixelFormat = format;
-}
-
 bool
 MoviePlayerCore::IsVideoAvailable() const
 {
@@ -188,6 +184,14 @@ MoviePlayerCore::FrameRate() const
   std::lock_guard<std::mutex> lock(mApiMutex);
 
   return mFrameRate;
+}
+
+PixelFormat
+MoviePlayerCore::OutputPixelFormat() const
+{
+  std::lock_guard<std::mutex> lock(mApiMutex);
+
+  return mOutputPixelFormat;
 }
 
 bool
@@ -317,13 +321,11 @@ MoviePlayerCore::SelectTargetTrack()
         // 5コア以上なら4スレッド、4コア以下なら2スレッド。
         // テストでは1080pくらいなら4スレッド以上は特に変わらない感じ。
         config.vpx.decCfg.threads = get_num_of_cpus() > 4 ? 4 : 2;
-        // rgbFormat を指定するとdecoder 内部で変換まで終わらせる
-        // その代わり MoviePlayerCore::RenderFrame() で指定したフォーマットは
-        // 無視されるようになる。デコーダスレッド上でyuv/rgb変換が行われるので
-        // メインループのCPU時間をコスト高のyuv変換で消費しなくなるメリットがある
-        config.vpx.rgbFormat = mPixelFormat;
-        config.vpx.alphaMode = info.v.alphaMode;
+        config.vpx.rgbFormat      = mPixelFormat;
+        config.vpx.alphaMode      = info.v.alphaMode;
         mVideoDecoder->Configure(config);
+
+        mOutputPixelFormat = mVideoDecoder->OutputPixelFormat();
       }
 
       mExtractor->SelectTrack(TRACK_TYPE_VIDEO, i);
@@ -358,16 +360,8 @@ MoviePlayerCore::SelectTargetTrack()
       mExtractor->GetCodecPrivateData(i, config.privateData);
       mAudioDecoder->Configure(config);
 
-      // AudioEngineを作成する
-      // TODO AUDIO_FORMAT_S16 で決め打ちしておくが、汎用にするかどうか
-      if (mAudioEngine != nullptr) {
-        mAudioEngine->Stop();
-        delete mAudioEngine;
-      }
+      // TODO AUDIO_FORMAT_S16 で固定。汎用にするならインタフェース追加
       AudioFormat audioFormat = AUDIO_FORMAT_S16;
-      mAudioEngine            = new AudioEngine();
-      mAudioEngine->Init(this, audioFormat, info.a.channels, info.a.sampleRate);
-
       switch (audioFormat) {
       case AUDIO_FORMAT_U8:
         mAudioUnitSize = info.a.channels * 1;
@@ -379,6 +373,16 @@ MoviePlayerCore::SelectTargetTrack()
       case AUDIO_FORMAT_F32:
         mAudioUnitSize = info.a.channels * 4;
         break;
+      }
+
+      // 自前オーディオ再生の場合はAudioEngineを作成する
+      if (mUseAudioEngine) {
+        if (mAudioEngine != nullptr) {
+          mAudioEngine->Stop();
+          delete mAudioEngine;
+        }
+        mAudioEngine = new AudioEngine();
+        mAudioEngine->Init(this, audioFormat, info.a.channels, info.a.sampleRate);
       }
 
       mExtractor->SelectTrack(TRACK_TYPE_AUDIO, i);
@@ -570,7 +574,7 @@ MoviePlayerCore::Decode()
     return;
   }
 
-  bool isMovieDone       = false;
+  bool isMovieDone = false;
   if (mSawInputEOS && mSawOutputEOS) {
     // ラストフレームの持続時間をケアした再生完走判定
     int64_t endTimeUs = mClock.GetEndSystemTime();

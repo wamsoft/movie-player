@@ -44,6 +44,15 @@ public:
     PCM_F32     = 3,
   };
 
+  // ビデオ出力フォーマット
+  struct VideoFormat
+  {
+    int32_t width;
+    int32_t height;
+    float frameRate;
+    ColorFormat colorFormat;
+  };
+
   // オーディオ出力フォーマット
   struct AudioFormat
   {
@@ -58,13 +67,14 @@ public:
   {
     ColorFormat videoColorFormat;
     bool useOwnAudioEngine;
+    void Init()
+    {
+      videoColorFormat  = COLOR_UNKNOWN;
+      useOwnAudioEngine = true;
+    }
   };
 
-  IMoviePlayer()
-  : mColorFormat(COLOR_UNKNOWN)
-  , mOnAudioDecoded(nullptr)
-  , mOnAudioDecodedUserPtr(nullptr)
-  {}
+  IMoviePlayer() {}
   virtual ~IMoviePlayer() {}
 
   virtual void Play(bool loop = false) = 0;
@@ -74,15 +84,9 @@ public:
   virtual void Seek(int64_t posUs)     = 0;
   virtual void SetLoop(bool loop)      = 0;
 
-  // RenderFrameで渡されるColorFormatではなく固定のフォーマットとして設定する
-  // Open()前に呼ぶ必要があり、Open後の呼び出しは作用が保証されない。
-  virtual void SetColorFormat(ColorFormat format) { mColorFormat = format; }
-
   // video info
-  virtual bool IsVideoAvailable() const = 0;
-  virtual int32_t Width() const         = 0;
-  virtual int32_t Height() const        = 0;
-  virtual float FrameRate() const       = 0;
+  virtual bool IsVideoAvailable() const                  = 0;
+  virtual void GetVideoFormat(VideoFormat *format) const = 0;
 
   // audio info
   virtual bool IsAudioAvailable() const                  = 0;
@@ -113,11 +117,5 @@ public:
     return false;
   }
 
-  static IMoviePlayer *CreateMoviePlayer(const char *filename,
-                                         ColorFormat format = COLOR_UNKNOWN);
-
-protected:
-  ColorFormat mColorFormat;
-  OnAudioDecoded mOnAudioDecoded;
-  void *mOnAudioDecodedUserPtr;
+  static IMoviePlayer *CreateMoviePlayer(const char *filename, InitParam &param);
 };

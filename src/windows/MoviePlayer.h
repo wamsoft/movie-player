@@ -8,7 +8,7 @@
 class MoviePlayer : public IMoviePlayer
 {
 public:
-  MoviePlayer();
+  MoviePlayer(InitParam &param);
   virtual ~MoviePlayer();
 
   bool Open(const char *filepath);
@@ -19,13 +19,10 @@ public:
   virtual void Resume() override;
   virtual void Seek(int64_t posUs) override;
   virtual void SetLoop(bool loop) override;
-  virtual void SetColorFormat(ColorFormat format) override;
 
   // video info
   virtual bool IsVideoAvailable() const override;
-  virtual int32_t Width() const override;
-  virtual int32_t Height() const override;
-  virtual float FrameRate() const override;
+  virtual void GetVideoFormat(VideoFormat *format) const override;
 
   // audio info
   virtual bool IsAudioAvailable() const override;
@@ -52,4 +49,5 @@ private:
 
 private:
   class MoviePlayerCore *mPlayer;
+  InitParam mInitParam;
 };

@@ -65,16 +65,16 @@ main(int argc, char *argv[])
   glfwSetKeyCallback(glfwWin, key_callback);
 
   // MoviePlayer を作成
+  IMoviePlayer::InitParam param;
+  param.Init();
 #if defined(TEST_PRE_CONV_YUV) && !defined(TEST_DIB_MODE)
-  // 固定出力フォーマット指定
-  // これをしないと毎フレーム MoviePlayer::RenderFrame() の度に
-  // YUV->RGB変換が行われるので効率が悪くなります。
-  IMoviePlayer::ColorFormat format = IMoviePlayer::COLOR_BGRA;
+  // デコード時にYUV>BGR変換まで行う
+  param.videoColorFormat = IMoviePlayer::COLOR_BGRA;
 #else
-  // UNKNOWN の場合はなプレイヤー内部ではYUV変換を行わない
-  IMoviePlayer::ColorFormat format = IMoviePlayer::COLOR_NOCONV;
+  // UNKNOWN/NOCONV の場合は内部でYUV変換を行わない。シェーダなどで対応すると性能的に有利
+  param.videoColorFormat = IMoviePlayer::COLOR_NOCONV;
 #endif
-  IMoviePlayer *player = IMoviePlayer::CreateMoviePlayer(testFilePath.c_str(), format);
+  IMoviePlayer *player = IMoviePlayer::CreateMoviePlayer(testFilePath.c_str(), param);
   if (player == nullptr) {
     printf("Failed to create MoviePlayer! \n");
     goto finish;
@@ -89,10 +89,13 @@ main(int argc, char *argv[])
     // なる場合はしかるべく対処すること。
 
     // 情報取得
-    int32_t w      = player->Width();
-    int32_t h      = player->Height();
+    IMoviePlayer::VideoFormat vf;
+    player->GetVideoFormat(&vf);
+    int32_t w      = vf.width;
+    int32_t h      = vf.height;
+    float fps      = vf.frameRate;
     uint64_t total = player->Duration();
-    printf("MOVIE: Width = %d Height = %d\n", w, h);
+    printf("MOVIE: Width = %d Height = %d Fps = %.2f\n", w, h, fps);
 
     // pause/resume テスト用
     std::uniform_int_distribution<> rand(0, total / 4);
@@ -132,7 +135,8 @@ main(int argc, char *argv[])
 
 #if defined(TEST_DIB_MODE)
       // DIBの逆stride状態を想定したケース用
-      player->RenderFrame(pixels + w * (h - 1) * 4, w, h, -1 * w * 4, IMoviePlayer::COLOR_BGRA);
+      player->RenderFrame(pixels + w * (h - 1) * 4, w, h, -1 * w * 4,
+                          IMoviePlayer::COLOR_BGRA);
 #else
       player->RenderFrame(pixels, w, h, w * 4, IMoviePlayer::COLOR_BGRA);
 #endif

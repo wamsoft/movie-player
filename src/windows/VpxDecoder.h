@@ -23,9 +23,12 @@ public:
 
   virtual const char *CodecName() const { return "vpx"; }
 
+  virtual PixelFormat OutputPixelFormat() const;
+
 private:
   void CodecErrorMessage(const char *msg);
-  void CopyToDecodedBuffer(DecodedBuffer *vdcBuf, uint64_t time, vpx_image *vpxImg, vpx_image *vpxImgAlpha = nullptr);
+  void CopyToDecodedBuffer(DecodedBuffer *vdcBuf, uint64_t time, vpx_image *vpxImg,
+                           vpx_image *vpxImgAlpha = nullptr);
 
 private:
   bool mIsConfigured;
@@ -37,5 +40,4 @@ private:
 
   bool mAlphaMode;
   vpx_codec_ctx_t mAlphaCodec;
-
 };

@@ -158,7 +158,7 @@ AudioEngine::Init(MoviePlayerCore *player, AudioFormat format, int32_t channels,
 
   // 初期ボリューム取得
   mVolume = ma_sound_get_volume(&mSound);
-  LOGV("initial sound volume: %f\n", mVolume);
+  // LOGV("initial sound volume: %f\n", mVolume);
 
   LOGV("miniaudio engine initialized!\n");
 

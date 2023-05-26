@@ -45,11 +45,50 @@ conv_color_format(IMoviePlayer::ColorFormat colorFormat)
   return pixelFormat;
 }
 
+static inline IMoviePlayer::ColorFormat
+conv_pixel_format(PixelFormat pixelFormat)
+{
+  IMoviePlayer::ColorFormat colorFormat = IMoviePlayer::COLOR_UNKNOWN;
+
+  switch (colorFormat) {
+  case PIXEL_FORMAT_UNKNOWN:
+    colorFormat = IMoviePlayer::COLOR_UNKNOWN;
+    break;
+  case PIXEL_FORMAT_ABGR:
+    colorFormat = IMoviePlayer::COLOR_ABGR;
+    break;
+  case PIXEL_FORMAT_ARGB:
+    colorFormat = IMoviePlayer::COLOR_ARGB;
+    break;
+  case PIXEL_FORMAT_RGBA:
+    colorFormat = IMoviePlayer::COLOR_RGBA;
+    break;
+  case PIXEL_FORMAT_BGRA:
+    colorFormat = IMoviePlayer::COLOR_BGRA;
+    break;
+  case PIXEL_FORMAT_I420:
+    colorFormat = IMoviePlayer::COLOR_I420;
+    break;
+  case PIXEL_FORMAT_NV12:
+    colorFormat = IMoviePlayer::COLOR_NV12;
+    break;
+  case PIXEL_FORMAT_NV21:
+    colorFormat = IMoviePlayer::COLOR_NV21;
+    break;
+  default:
+    ASSERT(false, "unknown internal pixel format: %d\n", colorFormat);
+    break;
+  }
+
+  return colorFormat;
+}
+
 // -----------------------------------------------------------------------------
 // MoviePlayer
 // -----------------------------------------------------------------------------
-MoviePlayer::MoviePlayer()
+MoviePlayer::MoviePlayer(InitParam &param)
 : mPlayer(nullptr)
+, mInitParam(param)
 {
   Init();
 }
@@ -76,8 +115,8 @@ MoviePlayer::Done()
 bool
 MoviePlayer::Open(const char *filepath)
 {
-  mPlayer = new MoviePlayerCore();
-  mPlayer->SetPixelFormat(conv_color_format(mColorFormat));
+  mPlayer = new MoviePlayerCore(conv_color_format(mInitParam.videoColorFormat),
+                                mInitParam.useOwnAudioEngine);
   return mPlayer->Open(filepath);
 }
 
@@ -141,17 +180,6 @@ MoviePlayer::SetLoop(bool loop)
   }
 }
 
-void
-MoviePlayer::SetColorFormat(ColorFormat format)
-{
-  LOGV("MoviePlayer: set ColorFormat=%d\n", format);
-
-  IMoviePlayer::SetColorFormat(format);
-  if (mPlayer) {
-    mPlayer->SetPixelFormat(conv_color_format(mColorFormat));
-  }
-}
-
 bool
 MoviePlayer::IsVideoAvailable() const
 {
@@ -162,33 +190,14 @@ MoviePlayer::IsVideoAvailable() const
   }
 }
 
-int32_t
-MoviePlayer::Width() const
+void
+MoviePlayer::GetVideoFormat(VideoFormat *format) const
 {
-  if (mPlayer) {
-    return mPlayer->Width();
-  } else {
-    return -1;
-  }
-}
-
-int32_t
-MoviePlayer::Height() const
-{
-  if (mPlayer) {
-    return mPlayer->Height();
-  } else {
-    return -1;
-  }
-}
-
-float
-MoviePlayer::FrameRate() const
-{
-  if (mPlayer) {
-    return mPlayer->FrameRate();
-  } else {
-    return -1.f;
+  if (IsVideoAvailable() && format != nullptr) {
+    format->width       = mPlayer->Width();
+    format->height      = mPlayer->Height();
+    format->frameRate   = mPlayer->FrameRate();
+    format->colorFormat = conv_pixel_format(mPlayer->OutputPixelFormat());
   }
 }
 
@@ -293,15 +302,6 @@ MoviePlayer::RenderFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes
   PixelFormat internalFormat = PIXEL_FORMAT_UNKNOWN;
   switch (format) {
   case COLOR_UNKNOWN:
-    // UNKNOWNはMoviePlayer::SetColorFormat()で有効なカラーをデフォルトとして
-    // 設定している場合のみ有効な指定。
-    if (mColorFormat == MoviePlayer::COLOR_UNKNOWN) {
-      ASSERT(
-        false,
-        "if you specify MoviePlayer::COLOR_UNKNOWN color format for MoviePlayer::RenderFrame(),"
-        " you MUST set default color format with MoviePlayer::SetColorFormat().\n");
-      return;
-    }
     break;
   case COLOR_ABGR:
     internalFormat = PIXEL_FORMAT_ABGR;
@@ -339,27 +339,20 @@ MoviePlayer::RenderFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes
 
   // LOGV("decoded buffer frame: %lld size:%zu\n", buf->frame, buf->dataSize);
 
-  // デフォルトカラーフォーマットが未指定なので、ここでピクセル変換を行う
-  if (mColorFormat == MoviePlayer::COLOR_UNKNOWN) {
-    // 毎フレーム色変換を行う場合はlibyuv側で変換時に逆strideにも対応した処理を
-    // 行ってくれるのでそれに任せる
-    convert_yuv_to_rgb32(dst, strideBytes, internalFormat, dcBuf);
+  // TODO 事前色変換処理での逆ストライド対応
+  //      事前にカラーフォーマットだけでなく、RenderFrameの情報を
+  //      まるっと設定できるようにしておくか、SetColorFormat()にdibModeみたいなフラグをつけるか
+  // 色変換済みの場合はストライドに合わせて詰め直しの処理を行う
+  if (strideBytes == w * 4) {
+    memcpy(dst, dcBuf->data, dcBuf->dataSize);
   } else {
-    // TODO 事前色変換処理での逆ストライド対応
-    //      事前にカラーフォーマットだけでなく、RenderFrameの情報を
-    //      まるっと設定できるようにしておくか、SetColorFormat()にdibModeみたいなフラグをつけるか
-    // 色変換済みの場合はストライドに合わせて詰め直しの処理を行う
-    if (strideBytes == w * 4) {
-      memcpy(dst, dcBuf->data, dcBuf->dataSize);
-    } else {
-      uint8_t *d = dst;
-      uint8_t *s = dcBuf->data;
-      int spitch = w * 4;
-      for (int y = 0; y < h; y++) {
-        memcpy(d, s, spitch);
-        s += spitch;
-        d += strideBytes;
-      }
+    uint8_t *d = dst;
+    uint8_t *s = dcBuf->data;
+    int spitch = w * 4;
+    for (int y = 0; y < h; y++) {
+      memcpy(d, s, spitch);
+      s += spitch;
+      d += strideBytes;
     }
   }
 }
@@ -380,10 +373,9 @@ MoviePlayer::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *frames
 }
 
 IMoviePlayer *
-IMoviePlayer::CreateMoviePlayer(const char *filename, ColorFormat format)
+IMoviePlayer::CreateMoviePlayer(const char *filename, InitParam &param)
 {
-  MoviePlayer *player = new MoviePlayer();
-  player->SetColorFormat(format);
+  MoviePlayer *player = new MoviePlayer(param);
   if (player->Open(filename)) {
     return player;
   }
