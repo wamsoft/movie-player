@@ -53,6 +53,13 @@ public:
     PcmEncoding encoding;
   };
 
+  // 生成パラメータ
+  struct InitParam
+  {
+    ColorFormat videoColorFormat;
+    bool useOwnAudioEngine;
+  };
+
   IMoviePlayer()
   : mColorFormat(COLOR_UNKNOWN)
   , mOnAudioDecoded(nullptr)
@@ -66,8 +73,6 @@ public:
   virtual void Resume()                = 0;
   virtual void Seek(int64_t posUs)     = 0;
   virtual void SetLoop(bool loop)      = 0;
-
-  // TODO Create時にパラメータとして渡すように変更してこれは削除する
 
   // RenderFrameで渡されるColorFormatではなく固定のフォーマットとして設定する
   // Open()前に呼ぶ必要があり、Open後の呼び出しは作用が保証されない。

@@ -150,6 +150,8 @@ public:
 
   int64_t GetCurrentSystemTime() const { return get_time_us(); }
 
+  int64_t GetEndSystemTime() const { return mStartSystemTimeUs + mDurationUs; }
+
 #if 0 // TODO OBSOLETE
   int64_t CalcDelay(int64_t mediaTimeUs, int64_t nowUs = -1)
   {

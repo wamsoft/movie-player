@@ -571,25 +571,14 @@ MoviePlayerCore::Decode()
   }
 
   bool isMovieDone       = false;
-  bool isDecodeCompleted = mSawInputEOS && mSawOutputEOS;
-  if (isDecodeCompleted) {
-    // ラストフレームの持続時間をケア
-    // リアルタイムクロックを参照して、Durationを超えていればdone処理をする
-    // - 最後のリアルタイムオーディオ時間(あるいはビデオ時間)と現在の時間差
-    // - 動画のDuration - 最後のフレームのPTS
-
-    // seekした場合もケアする必要がある。startTimeはあてにできない？
+  if (mSawInputEOS && mSawOutputEOS) {
+    // ラストフレームの持続時間をケアした再生完走判定
+    int64_t endTimeUs = mClock.GetEndSystemTime();
+    int64_t nowUs     = mClock.GetCurrentSystemTime();
+    isMovieDone       = (nowUs >= endTimeUs);
   }
 
-  if (isDecodeCompleted) {
-
-#if 0 // TODO sleepではなくてyiedして空ループで消化する感じで
-    // 最後のフレームは(Duration-現フレームPTS)分だけ残す
-    int64_t postDelay = mClock.GetDuration() - mClock.GetCurrentMediaTime();
-    // LOGV("render post delay sleep: %lld us \n", postDelay);
-    std::this_thread::sleep_for(std::chrono::microseconds(postDelay));
-#endif
-
+  if (isMovieDone) {
     if (mIsLoop) {
       LOGV("---- Loop ----\n");
       Post(MSG_SEEK, 0);
