@@ -25,6 +25,7 @@ public:
   virtual bool IsVideoAvailable() const override;
   virtual int32_t Width() const override;
   virtual int32_t Height() const override;
+  virtual float FrameRate() const override;
 
   // audio info
   virtual bool IsAudioAvailable() const override;
@@ -36,8 +37,9 @@ public:
   virtual bool IsPlaying() const override;
   virtual bool Loop() const override;
 
+  // TODO DELETE?
   virtual void RenderFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes,
-                           ColorFormat format = UNKNOWN) override;
+                           ColorFormat format = COLOR_UNKNOWN) override;
 
   virtual bool GetVideoFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes,
                              uint64_t *timeStampUs) override;

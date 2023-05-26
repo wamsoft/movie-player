@@ -182,6 +182,14 @@ MoviePlayerCore::Height() const
   return mHeight;
 }
 
+float
+MoviePlayerCore::FrameRate() const
+{
+  std::lock_guard<std::mutex> lock(mApiMutex);
+
+  return mFrameRate;
+}
+
 bool
 MoviePlayerCore::IsAudioAvailable() const
 {
@@ -249,7 +257,7 @@ MoviePlayerCore::IsPlaying() const
 {
   std::lock_guard<std::mutex> lock(mApiMutex);
 
-  return (mState == STATE_PLAY || mState == STATE_PAUSE);
+  return (mState == STATE_PLAY || mState == STATE_PAUSE || mState == STATE_PRELOADING);
 }
 
 bool
@@ -278,7 +286,8 @@ MoviePlayerCore::SelectTargetTrack()
 
     switch (info.type) {
     case TRACK_TYPE_VIDEO: {
-      LOGV(" VIDEO: width=%d, height=%d\n", info.v.width, info.v.height);
+      LOGV(" VIDEO: width=%d, height=%d, fps=%f\n", info.v.width, info.v.height,
+           info.v.frameRate);
 
       if (mVideoDecoder != nullptr) {
         // 複数ビデオトラックの場合は最初のトラックのみ対象とする
@@ -290,8 +299,9 @@ MoviePlayerCore::SelectTargetTrack()
         continue;
       }
 
-      mWidth  = info.v.width;
-      mHeight = info.v.height;
+      mWidth     = info.v.width;
+      mHeight    = info.v.height;
+      mFrameRate = info.v.frameRate;
 
       mVideoDecoder = (VideoDecoder *)Decoder::CreateDecoder(info.codecId);
       ASSERT(mVideoDecoder != nullptr, "failed to create video decoder\n");
@@ -460,6 +470,7 @@ MoviePlayerCore::HandleVideoOutput()
   bool isPreloading     = CurrentStateIs(STATE_PRELOADING);
   bool isFrameReady     = false;
   bool isFirstOfPreload = isPreloading;
+  bool isFrameSkipping  = false;
   int32_t dcBufIndex    = -1;
 
   do {
@@ -474,11 +485,16 @@ MoviePlayerCore::HandleVideoOutput()
             UpdateDecodedFrameNext(buf);
           }
         }
+      } else if (isFrameSkipping) {
+        // フレームスキップ解消中にデコード結果を吸い上げきった
+        isFrameSkipping = false;
       }
     }
 
     // 次フレームに入れ替えるかチェック
     if (mDecodedFrameNext) {
+      isFrameSkipping = false;
+
       int64_t timeDiff   = -1;
       int64_t nextTimeUs = ns_to_us(mDecodedFrameNext->timeStampNs);
       if (isFirstOfPreload) {
@@ -493,16 +509,24 @@ MoviePlayerCore::HandleVideoOutput()
           timeDiff = mClock.CalcDiffFromSystemTime(nextTimeUs);
         }
         // LOGV("frame diff time=%lld\n", timeDiff);
-        // TODO フレームスキップ
-        // UpdateDecodedFrameNext(nullptr);
-        if (timeDiff >= 0) {
+
+        // フレームスキップ判断のスレッショルド: 1/2フレーム遅れたら飛ばす
+        int64_t frameSkipThresh = s_to_us(1 / mFrameRate / 2);
+        if (timeDiff >= frameSkipThresh) {
+          // フレームスキップ
+          LOGV("*** video frame skipped: pts=%lld media=%lld sys=%lldus ***\n",
+               nextTimeUs, mClock.GetCurrentMediaTime(), mClock.GetCurrentSystemTime());
+          UpdateDecodedFrameNext(nullptr);
+          isFrameSkipping = true;
+        } else if (timeDiff >= 0) {
+          // 出力ビデオフレーム更新
           UpdateDecodedFrame(nullptr);
           isFrameReady = true;
         }
       }
     }
 
-  } while (isPreloading && !isFrameReady);
+  } while ((isPreloading && !isFrameReady) || isFrameSkipping);
 }
 
 void
@@ -703,13 +727,15 @@ MoviePlayerCore::UpdateDecodedFrame(DecodedBuffer *newFrame)
     DecodedBuffer *prevFrame = mDecodedFrame;
     mDecodedFrame            = newFrame;
 
+    // LOGV("new video frame: pts=%lld us\n", ns_to_us(mDecodedFrame->timeStampNs));
+
     // 前フレームがダミーフレームでなければ開放
     if (prevFrame != &mDummyFrame) {
       mVideoDecoder->ReleaseDecodedBufferIndex(prevFrame->bufIndex);
     }
 
     // 新フレームがダミーフレームではなく、
-    // Audioトラックがない場合は、メディアタイマーをビデオフレームのPTSで更新
+    // Audioトラックがない場合は、メディアタイムをビデオフレームのPTSで更新
     if (!IsAudioAvailable() && newFrame != &mDummyFrame) {
       int64_t mediaTimeNs = ns_to_us(mDecodedFrame->timeStampNs);
       mClock.SetCurrentMediaTime(ns_to_us(mediaTimeNs));

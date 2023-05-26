@@ -58,6 +58,7 @@ public:
   // 「Open後に正しい情報が取れる」という仕様には反さないので問題にはならないはず。
   int32_t Width() const;
   int32_t Height() const;
+  float FrameRate() const;
 
   bool IsAudioAvailable() const;
   int32_t SampleRate() const;
@@ -121,6 +122,7 @@ private:
 
   // video 情報
   int32_t mWidth, mHeight;
+  float mFrameRate;
   PixelFormat mPixelFormat;
 
   // ストリームフラグ

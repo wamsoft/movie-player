@@ -69,10 +69,10 @@ main(int argc, char *argv[])
   // 固定出力フォーマット指定
   // これをしないと毎フレーム MoviePlayer::RenderFrame() の度に
   // YUV->RGB変換が行われるので効率が悪くなります。
-  IMoviePlayer::ColorFormat format = IMoviePlayer::BGRA;
+  IMoviePlayer::ColorFormat format = IMoviePlayer::COLOR_BGRA;
 #else
   // UNKNOWN の場合はなプレイヤー内部ではYUV変換を行わない
-  IMoviePlayer::ColorFormat format = IMoviePlayer::UNKNOWN;
+  IMoviePlayer::ColorFormat format = IMoviePlayer::COLOR_NOCONV;
 #endif
   IMoviePlayer *player = IMoviePlayer::CreateMoviePlayer(testFilePath.c_str(), format);
   if (player == nullptr) {
@@ -132,9 +132,9 @@ main(int argc, char *argv[])
 
 #if defined(TEST_DIB_MODE)
       // DIBの逆stride状態を想定したケース用
-      player->RenderFrame(pixels + w * (h - 1) * 4, w, h, -1 * w * 4, IMoviePlayer::BGRA);
+      player->RenderFrame(pixels + w * (h - 1) * 4, w, h, -1 * w * 4, IMoviePlayer::COLOR_BGRA);
 #else
-      player->RenderFrame(pixels, w, h, w * 4, IMoviePlayer::BGRA);
+      player->RenderFrame(pixels, w, h, w * 4, IMoviePlayer::COLOR_BGRA);
 #endif
       renderer.UpdateTexture(pixels, pixelBytes);
       renderer.Render(frameCount);

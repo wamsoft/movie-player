@@ -26,7 +26,7 @@ main(int argc, char *argv[])
 
   // MoviePlayer を作成
   IMoviePlayer *player =
-    IMoviePlayer::CreateMoviePlayer(testFilePath.c_str(), IMoviePlayer::RGBA);
+    IMoviePlayer::CreateMoviePlayer(testFilePath.c_str(), IMoviePlayer::COLOR_RGBA);
   if (player == nullptr) {
     printf("Failed to create MoviePlayer! \n");
     goto finish;

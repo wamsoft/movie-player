@@ -13,28 +13,28 @@ conv_color_format(IMoviePlayer::ColorFormat colorFormat)
   PixelFormat pixelFormat = PIXEL_FORMAT_UNKNOWN;
 
   switch (colorFormat) {
-  case IMoviePlayer::UNKNOWN:
+  case IMoviePlayer::COLOR_UNKNOWN:
     pixelFormat = PIXEL_FORMAT_UNKNOWN;
     break;
-  case IMoviePlayer::ABGR:
+  case IMoviePlayer::COLOR_ABGR:
     pixelFormat = PIXEL_FORMAT_ABGR;
     break;
-  case IMoviePlayer::ARGB:
+  case IMoviePlayer::COLOR_ARGB:
     pixelFormat = PIXEL_FORMAT_ARGB;
     break;
-  case IMoviePlayer::RGBA:
+  case IMoviePlayer::COLOR_RGBA:
     pixelFormat = PIXEL_FORMAT_RGBA;
     break;
-  case IMoviePlayer::BGRA:
+  case IMoviePlayer::COLOR_BGRA:
     pixelFormat = PIXEL_FORMAT_BGRA;
     break;
-  case IMoviePlayer::I420:
+  case IMoviePlayer::COLOR_I420:
     pixelFormat = PIXEL_FORMAT_I420;
     break;
-  case IMoviePlayer::NV12:
+  case IMoviePlayer::COLOR_NV12:
     pixelFormat = PIXEL_FORMAT_NV12;
     break;
-  case IMoviePlayer::NV21:
+  case IMoviePlayer::COLOR_NV21:
     pixelFormat = PIXEL_FORMAT_NV21;
     break;
   default:
@@ -182,6 +182,16 @@ MoviePlayer::Height() const
   }
 }
 
+float
+MoviePlayer::FrameRate() const
+{
+  if (mPlayer) {
+    return mPlayer->FrameRate();
+  } else {
+    return -1.f;
+  }
+}
+
 bool
 MoviePlayer::IsAudioAvailable() const
 {
@@ -202,16 +212,16 @@ MoviePlayer::GetAudioFormat(AudioFormat *format) const
     int32_t encoding      = mPlayer->Encoding();
     switch (encoding) {
     case AUDIO_FORMAT_S16:
-      format->encoding = PCM_16;
+      format->encoding = PCM_S16;
       break;
     case AUDIO_FORMAT_U8:
-      format->encoding = PCM_8;
+      format->encoding = PCM_U8;
       break;
     case AUDIO_FORMAT_F32:
-      format->encoding = PCM_FLOAT;
+      format->encoding = PCM_F32;
       break;
     case AUDIO_FORMAT_S32:
-      format->encoding = PCM_32;
+      format->encoding = PCM_S32;
       break;
     default:
       format->encoding = PCM_UNKNOWN;
@@ -282,32 +292,32 @@ MoviePlayer::RenderFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes
 
   PixelFormat internalFormat = PIXEL_FORMAT_UNKNOWN;
   switch (format) {
-  case UNKNOWN:
+  case COLOR_UNKNOWN:
     // UNKNOWNはMoviePlayer::SetColorFormat()で有効なカラーをデフォルトとして
     // 設定している場合のみ有効な指定。
-    if (mColorFormat == MoviePlayer::UNKNOWN) {
+    if (mColorFormat == MoviePlayer::COLOR_UNKNOWN) {
       ASSERT(
         false,
-        "if you specify MoviePlayer::UNKNOWN color format for MoviePlayer::RenderFrame(),"
+        "if you specify MoviePlayer::COLOR_UNKNOWN color format for MoviePlayer::RenderFrame(),"
         " you MUST set default color format with MoviePlayer::SetColorFormat().\n");
       return;
     }
     break;
-  case ABGR:
+  case COLOR_ABGR:
     internalFormat = PIXEL_FORMAT_ABGR;
     break;
-  case ARGB:
+  case COLOR_ARGB:
     internalFormat = PIXEL_FORMAT_ARGB;
     break;
-  case RGBA:
+  case COLOR_RGBA:
     internalFormat = PIXEL_FORMAT_RGBA;
     break;
-  case BGRA:
+  case COLOR_BGRA:
     internalFormat = PIXEL_FORMAT_BGRA;
     break;
-  case I420:
-  case NV12:
-  case NV21:
+  case COLOR_I420:
+  case COLOR_NV12:
+  case COLOR_NV21:
     ASSERT(false, "yuv format not supported for MoviePlayer::RenderFrame().\n");
     break;
   default:
@@ -330,7 +340,7 @@ MoviePlayer::RenderFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes
   // LOGV("decoded buffer frame: %lld size:%zu\n", buf->frame, buf->dataSize);
 
   // デフォルトカラーフォーマットが未指定なので、ここでピクセル変換を行う
-  if (mColorFormat == MoviePlayer::UNKNOWN) {
+  if (mColorFormat == MoviePlayer::COLOR_UNKNOWN) {
     // 毎フレーム色変換を行う場合はlibyuv側で変換時に逆strideにも対応した処理を
     // 行ってくれるのでそれに任せる
     convert_yuv_to_rgb32(dst, strideBytes, internalFormat, dcBuf);

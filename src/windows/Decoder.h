@@ -310,11 +310,11 @@ public:
 
   virtual DecoderType Type() const { return DECODER_TYPE_AUDIO; }
 
+  // TODO 出力フォーマットは、S16決め打ちになっているので
+  //      外部変更可能にする場合は初期化インタフェースを追加して対応のこと
   int32_t SampleRate() const { return mSampleRate; }
   int32_t Channels() const { return mChannels; }
-  
-   // TODO 現状S16決め打ち。外部から変更可能にする場合は適宜対応のこと
-  int32_t BitsPerSample() const { return sizeof(int16_t); }
+  int32_t BitsPerSample() const { return sizeof(int16_t) * 8; }
   int32_t Encoding() const { return AUDIO_FORMAT_S16; }
 
 protected:

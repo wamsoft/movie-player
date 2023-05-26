@@ -42,8 +42,8 @@ inline uint64_t ns_to_us(uint64_t ns) { return ns / 1000; }
 inline double   us_to_s(int64_t us)   { return us / 1'000'000.0; }
 inline double   ns_to_s(int64_t ns)   { return ns / 1'000'000'000.0; }
 
-inline int64_t  s_to_us(int64_t s)    { return s * 1'000'000; }
-inline int64_t  s_to_ns(int64_t s)    { return s * 1'000'000'000.0; }
+inline int64_t  s_to_us(double s)     { return s * 1'000'000; }
+inline int64_t  s_to_ns(double s)     { return s * 1'000'000'000.0; }
 // clang-format on
 
 // -----------------------------------------------------------------------------
