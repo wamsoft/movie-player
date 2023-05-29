@@ -62,6 +62,59 @@ public:
     PcmEncoding encoding;
   };
 
+  enum ColorRange
+  {
+    COLOR_RANGE_UNDEF = 0,
+    COLOR_RANGE_LIMITED,
+    COLOR_RANGE_FULL,
+  };
+
+  enum ColorSpace
+  {
+    COLOR_SPACE_UNKNOWN  = -1,
+    COLOR_SPACE_IDENTITY = 0,
+    COLOR_SPACE_BT_601,
+    COLOR_SPACE_BT_709,
+    COLOR_SPACE_SMPTE_170,
+    COLOR_SPACE_SMPTE_240,
+    COLOR_SPACE_BT_2020,
+    COLOR_SPACE_SRGB,
+  };
+
+  enum VideoPlaneIndex
+  {
+    VIDEO_PLANE_PACKED = 0,
+    VIDEO_PLANE_Y      = 0,
+    VIDEO_PLANE_U      = 1,
+    VIDEO_PLANE_V      = 2,
+    VIDEO_PLANE_A      = 3,
+    VIDEO_PLANE_COUNT
+  };
+
+  // ビデオフレーム
+  // *dataの内容は、次のGetVideoFrame()呼び出しでtrueが返る
+  // (VideoFrameが更新される)まで有効なので、必要なら適宜コピー保持すること
+  struct VideoFrame
+  {
+    ColorFormat colorFormat;
+
+    // カラースペース、カラーレンジはYUVフォーマット時のみ有効
+    // InitParam::videoColorFormatでRGB変換を指定している場合は
+    // 変換前のYUV状態でのcs/crが格納されている
+    ColorSpace colorSpace;
+    ColorRange colorRange;
+
+    int32_t width;
+    int32_t height;
+    int32_t displayWidth;
+    int32_t displayHeight;
+
+    size_t dataSize;
+    uint8_t *data;
+    uint8_t *planes[VIDEO_PLANE_COUNT]; // *data 内の各プレーン先頭ポインタ
+    int32_t stride[VIDEO_PLANE_COUNT];  // 各プレーンのストライド
+  };
+
   // 生成パラメータ
   struct InitParam
   {
@@ -98,24 +151,24 @@ public:
   virtual bool IsPlaying() const   = 0;
   virtual bool Loop() const        = 0;
 
-  // TODO Audioとの絡みで名称変更予定
-  // SetColorFormat()で固定フォーマットを指定した場合はformatの値は無視される
-  virtual void RenderFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes,
-                           ColorFormat format = COLOR_UNKNOWN) = 0;
-
-  // TODO こちらのインタフェースに変更予定
-  //      - 前回から更新があればtrueが返る
-  //      - フレームごとのカラーフォーマット指定はおそらく無駄なので廃止
+  // 出力ビデオフレームを指定したバッファへコピー取得する
+  // RGB系カラーフォマットしか想定されていないので、InitParam::videoColorFormatで
+  // RGB系フォーマットが指定されていない場合は常に失敗する
   virtual bool GetVideoFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes,
-                             uint64_t *timeStampUs)
-  {
-    return false;
-  }
+                             uint64_t *timeStampUs = nullptr) = 0;
+
+  // 出力ビデオフレームをプレイヤーの内部バッファを参照する形で取得する
+  // デコーダのYUV出力を無変換で取得したい場合などに使用する
+  // フレームの詳細なパラメータはVideoFrame構造体のメンバに含まれ
+  // フレームデータ自体は、次回GetVideoFrame()がtrueを返す(==更新が発生する)まで有効
+  // フレームデータに更新がない場合はfalseを返す
+  virtual bool GetVideoFrame(VideoFrame *frame, uint64_t *timeStampUs = nullptr) = 0;
+
+  // 出力オーディオ列を取得する。要求量のデコード出力が溜まっていない場合はfalseを返す。
+  // InitParam::useOwnAudioEngineがtrueの場合は、内部AudioEngine側にデータが
+  // 吸い上げられている状態で、外部には回せないようになっているので常にfalseを返す
   virtual bool GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
-                             uint64_t *timeStampUs)
-  {
-    return false;
-  }
+                             uint64_t *timeStampUs = nullptr) = 0;
 
   static IMoviePlayer *CreateMoviePlayer(const char *filename, InitParam &param);
 };

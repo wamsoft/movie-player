@@ -71,9 +71,7 @@ public:
   bool IsPlaying() const;
   bool Loop() const;
 
-  // TODO A/V 考慮(現状はVideoデータ決め打ち対応)
-  const DecodedBuffer *GetDecodedFrame() const;
-
+  bool GetVideoFrame(const DecodedBuffer **videoFrame);
   bool GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
                      uint64_t *timeStampUs);
 
@@ -96,17 +94,11 @@ protected:
   bool CurrentStateIs(State state) const;
 
   void InitDummyFrame();
-
-#if 0 // TODO 構成変更作業用
-  void UpdateVideoFrame();
+  void UpdateVideoFrameToNext();
   void SetVideoFrame(DecodedBuffer *newFrame);
-  void SetVideoFrameNext(DecodedBuffer *nextFrame)
-  void SetAudioFrame(DecodedBuffer *newFrame);
-#endif
+  void SetVideoFrameNext(DecodedBuffer *nextFrame);
 
-  // TODO DELETE
-  void UpdateDecodedFrame(DecodedBuffer *newFrame);
-  void UpdateDecodedFrameNext(DecodedBuffer *nextFrame);
+  void EnqueueAudio(DecodedBuffer *buf);
 
 private:
   // ステート
@@ -134,9 +126,10 @@ private:
   MediaClock mClock;
 
   // デコード済みフレーム
-  mutable std::mutex mDecodedFrameMutex;
+  mutable std::mutex mVideoFrameMutex;
   DecodedBuffer mDummyFrame;
-  DecodedBuffer *mDecodedFrame, *mDecodedFrameNext;
+  DecodedBuffer *mVideoFrame, *mVideoFrameNext;
+  DecodedBuffer *mVideoFrameLastGet;
 
   // オーディオ
   bool mUseAudioEngine;
@@ -152,12 +145,6 @@ private:
     void Reset() { base = INT64_MAX, offset = 0; }
   } mAudioTime;
   std::queue<DecodedBuffer *> mAudioFrameQueue;
-  void EnqueueAudio(DecodedBuffer *buf)
-  {
-    std::lock_guard<std::mutex> lock(mAudioFrameMutex);
-    mAudioFrameQueue.push(buf);
-    mAudioQueuedBytes += buf->dataSize;
-  }
 
   // 同期用イベントフラグ
   enum

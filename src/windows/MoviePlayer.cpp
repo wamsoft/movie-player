@@ -280,96 +280,132 @@ MoviePlayer::Loop() const
   }
 }
 
-void
-MoviePlayer::RenderFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes,
-                         ColorFormat format)
+bool
+MoviePlayer::GetVideoFrameCommon(const DecodedBuffer **dcBuf)
 {
-  if (dst == nullptr) {
-    LOGV("MoviePlayer: invalid destination buffer.\n");
-    return;
-  }
-
   if (!mPlayer) {
-    LOGV("MoviePlayer: internal player is not running.\n");
-    return;
+    LOGE("MoviePlayer: internal player is not running.\n");
+    return false;
   }
 
   if (!IsPlaying()) {
-    LOGV("MoviePlayer: video is not playing now.\n");
-    return;
+    LOGE("MoviePlayer: video is not playing now.\n");
+    return false;
   }
 
-  PixelFormat internalFormat = PIXEL_FORMAT_UNKNOWN;
-  switch (format) {
-  case COLOR_UNKNOWN:
-    break;
-  case COLOR_ABGR:
-    internalFormat = PIXEL_FORMAT_ABGR;
-    break;
-  case COLOR_ARGB:
-    internalFormat = PIXEL_FORMAT_ARGB;
-    break;
-  case COLOR_RGBA:
-    internalFormat = PIXEL_FORMAT_RGBA;
-    break;
-  case COLOR_BGRA:
-    internalFormat = PIXEL_FORMAT_BGRA;
-    break;
-  case COLOR_I420:
-  case COLOR_NV12:
-  case COLOR_NV21:
-    ASSERT(false, "yuv format not supported for MoviePlayer::RenderFrame().\n");
-    break;
-  default:
-    ASSERT(false, "unknown color format: %d\n", format);
-    break;
-  }
-
-  const DecodedBuffer *dcBuf = mPlayer->GetDecodedFrame();
-  if (dcBuf == nullptr) {
-    LOGV("no valid decoded frame exist.\n");
-    return;
-  }
-
-  if (dcBuf->frame < 0) {
-    // 無効フレーム
-    LOGV("invalid frame number.\n");
-    return;
-  }
-
-  // LOGV("decoded buffer frame: %lld size:%zu\n", buf->frame, buf->dataSize);
-
-  // TODO 事前色変換処理での逆ストライド対応
-  //      事前にカラーフォーマットだけでなく、RenderFrameの情報を
-  //      まるっと設定できるようにしておくか、SetColorFormat()にdibModeみたいなフラグをつけるか
-  // 色変換済みの場合はストライドに合わせて詰め直しの処理を行う
-  if (strideBytes == w * 4) {
-    memcpy(dst, dcBuf->data, dcBuf->dataSize);
-  } else {
-    uint8_t *d = dst;
-    uint8_t *s = dcBuf->data;
-    int spitch = w * 4;
-    for (int y = 0; y < h; y++) {
-      memcpy(d, s, spitch);
-      s += spitch;
-      d += strideBytes;
+  bool updated = mPlayer->GetVideoFrame(dcBuf);
+  if (updated) {
+    // 更新されている場合の不正バッファチェック
+    if (*dcBuf == nullptr) {
+      LOGE("invalid decoded frame.\n");
+      return false;
     }
+
+    if ((*dcBuf)->frame < 0) {
+      // 無効フレーム
+      LOGE("invalid frame number.\n");
+      return false;
+    }
+
+    // DEBUG
+    // LOGV("decoded buffer frame: %lld size:%zu\n", dcBuf->frame, dcBuf->dataSize);
   }
+
+  return updated;
 }
 
-// TODO WIP
 bool
 MoviePlayer::GetVideoFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes,
                            uint64_t *timeStampUs)
 {
-  return true;
+  if (!is_rgb_pixel_format(mPlayer->OutputPixelFormat())) {
+    LOGE("Video frame format is not a RGB-like color format.\n");
+    return false;
+  }
+
+  if (dst == nullptr) {
+    LOGE("MoviePlayer: invalid destination buffer.\n");
+    return false;
+  }
+
+  const DecodedBuffer *dcBuf = nullptr;
+  bool updated = GetVideoFrameCommon(&dcBuf);
+  if (updated) {
+    if (strideBytes == w * 4) {
+      memcpy(dst, dcBuf->data, dcBuf->dataSize);
+    } else {
+      uint8_t *d = dst;
+      uint8_t *s = dcBuf->data;
+      int spitch = w * 4;
+      for (int y = 0; y < h; y++) {
+        memcpy(d, s, spitch);
+        s += spitch;
+        d += strideBytes;
+      }
+    }
+    if (timeStampUs) {
+      *timeStampUs = ns_to_us(dcBuf->timeStampNs);
+    }
+  }
+
+  return updated;
+}
+
+bool
+MoviePlayer::GetVideoFrame(VideoFrame *frame, uint64_t *timeStampUs)
+{
+  if (frame == nullptr) {
+    LOGE("MoviePlayer: invalid destination buffer.\n");
+    return false;
+  }
+
+  const DecodedBuffer *dcBuf = nullptr;
+  bool updated = GetVideoFrameCommon(&dcBuf);
+  if (updated) {
+    frame->colorFormat = conv_pixel_format(mPlayer->OutputPixelFormat());
+    frame->colorSpace  = (IMoviePlayer::ColorSpace)dcBuf->v.colorSpace;
+    frame->colorRange  = (IMoviePlayer::ColorRange)dcBuf->v.colorRange;
+
+    frame->width         = dcBuf->v.width;
+    frame->height        = dcBuf->v.height;
+    frame->displayWidth  = dcBuf->v.displayWidth;
+    frame->displayHeight = dcBuf->v.displayHeight;
+
+    frame->data     = dcBuf->data;
+    frame->dataSize = dcBuf->dataSize;
+    for (int planeIdx = 0; planeIdx < VIDEO_PLANE_COUNT; planeIdx++) {
+      frame->planes[planeIdx] = dcBuf->v.planes[planeIdx];
+      frame->stride[planeIdx] = dcBuf->v.stride[planeIdx];
+    }
+
+    if (timeStampUs) {
+      *timeStampUs = ns_to_us(dcBuf->timeStampNs);
+    }
+  }
+
+  return updated;
 }
 
 bool
 MoviePlayer::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
                            uint64_t *timeStampUs)
 {
-  return true;
+  if (frames == nullptr) {
+    LOGE("MoviePlayer: invalid destination buffer.\n");
+    return false;
+  }
+
+  if (!mPlayer) {
+    LOGE("MoviePlayer: internal player is not running.\n");
+    return false;
+  }
+
+  if (!IsPlaying()) {
+    LOGE("MoviePlayer: video is not playing now.\n");
+    return false;
+  }
+
+  return mPlayer->GetAudioFrame(frames, frameCount, framesRead, timeStampUs);
 }
 
 IMoviePlayer *

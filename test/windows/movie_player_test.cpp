@@ -67,6 +67,7 @@ main(int argc, char *argv[])
   // MoviePlayer を作成
   IMoviePlayer::InitParam param;
   param.Init();
+  // param.useOwnAudioEngine = false; // アプリ側でオーディオエンジンを持つ場合false
 #if defined(TEST_PRE_CONV_YUV) && !defined(TEST_DIB_MODE)
   // デコード時にYUV>BGR変換まで行う
   param.videoColorFormat = IMoviePlayer::COLOR_BGRA;
@@ -83,11 +84,6 @@ main(int argc, char *argv[])
   glfwSetWindowUserPointer(glfwWin, player);
 
   {
-    // テストメモ：
-    // 寸法情報などは、Open()後はPlay()前に取得可能であることを想定しているので
-    // テストではそのような順序になるようにしてある。将来的にもしそこでエラーに
-    // なる場合はしかるべく対処すること。
-
     // 情報取得
     IMoviePlayer::VideoFormat vf;
     player->GetVideoFormat(&vf);
@@ -102,7 +98,7 @@ main(int argc, char *argv[])
     int64_t pausePoint  = rand(mt);
     int32_t pauseFrames = 120;
 
-    // RenderFrame() で描画済みフレームを受け取るバッファを用意
+    // GetVideoFrame() で描画済みフレームを受け取るバッファを用意
     int pixelBytes  = w * h * 4;
     uint8_t *pixels = new uint8_t[pixelBytes];
     memset(pixels, 0xff, pixelBytes);
@@ -135,10 +131,9 @@ main(int argc, char *argv[])
 
 #if defined(TEST_DIB_MODE)
       // DIBの逆stride状態を想定したケース用
-      player->RenderFrame(pixels + w * (h - 1) * 4, w, h, -1 * w * 4,
-                          IMoviePlayer::COLOR_BGRA);
+      player->GetVideoFrame(pixels + w * (h - 1) * 4, w, h, -1 * w * );
 #else
-      player->RenderFrame(pixels, w, h, w * 4, IMoviePlayer::COLOR_BGRA);
+      player->GetVideoFrame(pixels, w, h, w * 4);
 #endif
       renderer.UpdateTexture(pixels, pixelBytes);
       renderer.Render(frameCount);

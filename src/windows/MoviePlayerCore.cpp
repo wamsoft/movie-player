@@ -19,8 +19,8 @@ MoviePlayerCore::~MoviePlayerCore()
 void
 MoviePlayerCore::Init()
 {
-  mWidth              = -1;
-  mHeight             = -1;
+  mWidth             = -1;
+  mHeight            = -1;
   mOutputPixelFormat = PIXEL_FORMAT_UNKNOWN;
 
   mSawInputEOS  = false;
@@ -34,7 +34,8 @@ MoviePlayerCore::Init()
 
   mClock.Reset();
 
-  mDecodedFrame = mDecodedFrameNext = nullptr;
+  mVideoFrame = mVideoFrameNext = nullptr;
+  mVideoFrameLastGet            = nullptr;
   mDummyFrame.InitByType(TRACK_TYPE_VIDEO, -1);
 
   mAudioEngine      = nullptr;
@@ -54,9 +55,9 @@ MoviePlayerCore::InitDummyFrame()
     mDummyFrame.frame       = 0;
     memset(mDummyFrame.data, 0xff, mDummyFrame.capacity);
     {
-      std::lock_guard<std::mutex> lock(mDecodedFrameMutex);
+      std::lock_guard<std::mutex> lock(mVideoFrameMutex);
 
-      mDecodedFrame = &mDummyFrame;
+      mVideoFrame = &mDummyFrame;
     }
   }
 }
@@ -479,14 +480,14 @@ MoviePlayerCore::HandleVideoOutput()
 
   do {
     // 次フレームが未セットならデコード出力を吸い上げ
-    if (mDecodedFrameNext == nullptr) {
+    if (mVideoFrameNext == nullptr) {
       dcBufIndex = mVideoDecoder->DequeueDecodedBufferIndex();
       if (dcBufIndex >= 0) {
         DecodedBuffer *buf = mVideoDecoder->GetDecodedBuffer(dcBufIndex);
         mSawOutputEOS |= buf->isEndOfStream;
         if (!buf->isEndOfStream) {
           if (buf->dataSize > 0) {
-            UpdateDecodedFrameNext(buf);
+            SetVideoFrameNext(buf);
           }
         }
       } else if (isFrameSkipping) {
@@ -496,14 +497,14 @@ MoviePlayerCore::HandleVideoOutput()
     }
 
     // 次フレームに入れ替えるかチェック
-    if (mDecodedFrameNext) {
+    if (mVideoFrameNext) {
       isFrameSkipping = false;
 
       int64_t timeDiff   = -1;
-      int64_t nextTimeUs = ns_to_us(mDecodedFrameNext->timeStampNs);
+      int64_t nextTimeUs = ns_to_us(mVideoFrameNext->timeStampNs);
       if (isFirstOfPreload) {
         // プリロード時の初回は強制的にDecodedFrame更新
-        UpdateDecodedFrame(nullptr);
+        UpdateVideoFrameToNext();
         isFirstOfPreload = false;
         isFrameReady     = true;
       } else if (mClock.IsStarted()) {
@@ -520,11 +521,11 @@ MoviePlayerCore::HandleVideoOutput()
           // フレームスキップ
           LOGV("*** video frame skipped: pts=%lld media=%lld sys=%lldus ***\n",
                nextTimeUs, mClock.GetCurrentMediaTime(), mClock.GetCurrentSystemTime());
-          UpdateDecodedFrameNext(nullptr);
+          SetVideoFrameNext(nullptr);
           isFrameSkipping = true;
         } else if (timeDiff >= 0) {
           // 出力ビデオフレーム更新
-          UpdateDecodedFrame(nullptr);
+          UpdateVideoFrameToNext();
           isFrameReady = true;
         }
       }
@@ -648,7 +649,7 @@ MoviePlayerCore::HandleMessage(int32_t what, int64_t arg, void *data)
   } break;
 
   case MSG_STOP:
-    UpdateDecodedFrame(&mDummyFrame);
+    SetVideoFrame(&mDummyFrame);
     SetState(STATE_STOP);
     Post(MSG_NOP, 0, nullptr, true); // flush msg
     mEventFlag.Set(EVENT_FLAG_STOPPED);
@@ -675,9 +676,11 @@ MoviePlayerCore::Flush()
   // あるいは mDecodedFrameを毎回ポインタではなくコピー保持にする方法でも良いが
   // 現状ではポインタ保持なのでFlushの絡むseek処理のみこのように対応している。
   // (実際の所スレッド絡みなので毎回コピー保持したほうが丸いので、将来的にはそうなるかも)
-  mDummyFrame.CopyFrom(mDecodedFrame, false);
-  UpdateDecodedFrame(&mDummyFrame);
-  UpdateDecodedFrameNext(nullptr);
+  mDummyFrame.CopyFrom(mVideoFrame, false);
+  SetVideoFrame(&mDummyFrame);
+  SetVideoFrameNext(nullptr);
+
+  mVideoFrameLastGet = nullptr;
 
   // オーディオ出力待ちキューをフラッシュ＆ステータス類をリセット
   if (mAudioDecoder != nullptr) {
@@ -707,30 +710,36 @@ MoviePlayerCore::Flush()
 }
 
 void
-MoviePlayerCore::UpdateDecodedFrame(DecodedBuffer *newFrame)
+MoviePlayerCore::UpdateVideoFrameToNext()
 {
   if (mVideoDecoder) {
-    std::lock_guard<std::mutex> lock(mDecodedFrameMutex);
+    // mDecodedFrameNextをmDecodedFrameへスライドする
+    DecodedBuffer *newFrame = mVideoFrameNext;
+    mVideoFrameNext         = nullptr;
+    SetVideoFrame(newFrame);
+  }
+}
 
-    // newFrameを明示的に指定しない場合は、mDecodedFrameNextをスライドする
-    if (newFrame == nullptr) {
-      newFrame          = mDecodedFrameNext;
-      mDecodedFrameNext = nullptr;
-    }
-    DecodedBuffer *prevFrame = mDecodedFrame;
-    mDecodedFrame            = newFrame;
+void
+MoviePlayerCore::SetVideoFrame(DecodedBuffer *newFrame)
+{
+  if (mVideoDecoder) {
+    std::lock_guard<std::mutex> lock(mVideoFrameMutex);
 
-    // LOGV("new video frame: pts=%lld us\n", ns_to_us(mDecodedFrame->timeStampNs));
+    DecodedBuffer *prevFrame = mVideoFrame;
+    mVideoFrame              = newFrame;
+
+    // LOGV("new video frame: pts=%lld us\n", ns_to_us(mVideoFrame->timeStampNs));
 
     // 前フレームがダミーフレームでなければ開放
-    if (prevFrame != &mDummyFrame) {
+    if (prevFrame && prevFrame != &mDummyFrame) {
       mVideoDecoder->ReleaseDecodedBufferIndex(prevFrame->bufIndex);
     }
 
     // 新フレームがダミーフレームではなく、
     // Audioトラックがない場合は、メディアタイムをビデオフレームのPTSで更新
     if (!IsAudioAvailable() && newFrame != &mDummyFrame) {
-      int64_t mediaTimeNs = ns_to_us(mDecodedFrame->timeStampNs);
+      int64_t mediaTimeNs = ns_to_us(mVideoFrame->timeStampNs);
       mClock.SetCurrentMediaTime(ns_to_us(mediaTimeNs));
       if (!mClock.IsStarted()) {
         mClock.SetStartTime(mediaTimeNs);
@@ -740,27 +749,44 @@ MoviePlayerCore::UpdateDecodedFrame(DecodedBuffer *newFrame)
 }
 
 void
-MoviePlayerCore::UpdateDecodedFrameNext(DecodedBuffer *nextFrame)
+MoviePlayerCore::SetVideoFrameNext(DecodedBuffer *nextFrame)
 {
   if (mVideoDecoder) {
-    std::lock_guard<std::mutex> lock(mDecodedFrameMutex);
+    std::lock_guard<std::mutex> lock(mVideoFrameMutex);
 
     // フレームスキップなどで破棄するケースではnextがnon-nullで呼ばれるので
     // その場合は先に現在のnextを開放する
-    if (mDecodedFrameNext != nullptr) {
-      mVideoDecoder->ReleaseDecodedBufferIndex(mDecodedFrameNext->bufIndex);
-      mDecodedFrameNext = nullptr;
+    if (mVideoFrameNext != nullptr) {
+      mVideoDecoder->ReleaseDecodedBufferIndex(mVideoFrameNext->bufIndex);
+      mVideoFrameNext = nullptr;
     }
-    mDecodedFrameNext = nextFrame;
+    mVideoFrameNext = nextFrame;
   }
 }
 
-const DecodedBuffer *
-MoviePlayerCore::GetDecodedFrame() const
+bool
+MoviePlayerCore::GetVideoFrame(const DecodedBuffer **videoFrame)
 {
-  std::lock_guard<std::mutex> lock(mDecodedFrameMutex);
+  std::lock_guard<std::mutex> lock(mVideoFrameMutex);
 
-  return mDecodedFrame;
+  // とりあえず常に返しておいて問題はないはずなので返しておく
+  *videoFrame = mVideoFrame;
+
+  if (mVideoFrameLastGet != mVideoFrame) {
+    mVideoFrameLastGet = mVideoFrame;
+    return true;
+  } else {
+    return false;
+  }
+}
+
+void
+MoviePlayerCore::EnqueueAudio(DecodedBuffer *buf)
+{
+  std::lock_guard<std::mutex> lock(mAudioFrameMutex);
+
+  mAudioFrameQueue.push(buf);
+  mAudioQueuedBytes += buf->dataSize;
 }
 
 bool
