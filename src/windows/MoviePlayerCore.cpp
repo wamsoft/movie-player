@@ -69,7 +69,7 @@ MoviePlayerCore::Done()
   StopThread();
 
   if (mUseAudioEngine && mAudioEngine) {
-    mAudioEngine->Stop();
+    mAudioEngine->Done();
     delete mAudioEngine;
     mAudioEngine = nullptr;
   }
