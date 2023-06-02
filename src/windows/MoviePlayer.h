@@ -28,6 +28,9 @@ public:
   virtual bool IsAudioAvailable() const override;
   virtual void GetAudioFormat(AudioFormat *format) const override;
 
+  virtual void SetVolume(float volume) override;
+  virtual float Volume() const override;
+
   // info
   virtual int64_t Duration() const override;
   virtual int64_t Position() const override;

@@ -240,6 +240,24 @@ MoviePlayer::GetAudioFormat(AudioFormat *format) const
   }
 }
 
+void
+MoviePlayer::SetVolume(float volume)
+{
+  if (mPlayer) {
+    mPlayer->SetVolume(volume);
+  }
+}
+
+float
+MoviePlayer::Volume() const
+{
+  float volume = 1.0f;
+  if (mPlayer) {
+    volume = mPlayer->Volume();
+  }
+  return volume;
+}
+
 int64_t
 MoviePlayer::Duration() const
 {
@@ -329,7 +347,7 @@ MoviePlayer::GetVideoFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideByt
   }
 
   const DecodedBuffer *dcBuf = nullptr;
-  bool updated = GetVideoFrameCommon(&dcBuf);
+  bool updated               = GetVideoFrameCommon(&dcBuf);
   if (updated) {
     if (strideBytes == w * 4) {
       memcpy(dst, dcBuf->data, dcBuf->dataSize);
@@ -360,7 +378,7 @@ MoviePlayer::GetVideoFrame(VideoFrame *frame, uint64_t *timeStampUs)
   }
 
   const DecodedBuffer *dcBuf = nullptr;
-  bool updated = GetVideoFrameCommon(&dcBuf);
+  bool updated               = GetVideoFrameCommon(&dcBuf);
   if (updated) {
     frame->colorFormat = conv_pixel_format(mPlayer->OutputPixelFormat());
     frame->colorSpace  = (IMoviePlayer::ColorSpace)dcBuf->v.colorSpace;

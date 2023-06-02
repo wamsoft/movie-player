@@ -65,6 +65,8 @@ public:
   int32_t Channels() const;
   int32_t BitsPerSample() const;
   int32_t Encoding() const;
+  void SetVolume(float volume);
+  float Volume() const;
 
   int64_t Duration() const;
   int64_t Position() const;

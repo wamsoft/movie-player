@@ -1051,3 +1051,21 @@ MoviePlayerCore::IsCurrentState(State state) const
 {
   return GetState() == state;
 }
+
+void
+MoviePlayerCore::SetVolume(float volume)
+{
+  if (IsAudioAvailable() && mUseAudioEngine) {
+    mAudioEngine->SetVolume(volume);
+  }
+}
+
+float
+MoviePlayerCore::Volume() const
+{
+  float volume = 1.0f;
+  if (IsAudioAvailable() && mUseAudioEngine) {
+    volume = mAudioEngine->Volume();
+  }
+  return volume;
+}

@@ -3,6 +3,7 @@
 #include <thread>
 #include <chrono>
 #include <random>
+#include <algorithm>
 
 #include "GLRenderer.h"
 #include "IMoviePlayer.h"
@@ -40,6 +41,31 @@ key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
   }
 }
 
+void
+scroll_callback(GLFWwindow *window, double xoffset, double yoffset)
+{
+  // printf("xoffset=%lf, yoffset=%lf\n", xoffset, yoffset);
+
+  auto player = (IMoviePlayer *)glfwGetWindowUserPointer(window);
+  // if (!player->IsPlaying()) {
+  //   return;
+  // }
+
+  if (!player->IsAudioAvailable()) {
+    return; // no audio
+  }
+
+  float vol = player->Volume();
+  if (yoffset > 0) {
+    vol += 0.1f;
+  } else if (yoffset < 0) {
+    vol -= 0.1f;
+  }
+  player->SetVolume(std::max(std::min(1.f, vol), 0.f));
+
+  printf("Volume: %f\n", player->Volume());
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -61,8 +87,9 @@ main(int argc, char *argv[])
   renderer.EnableVSync(true);
   renderer.SetTextureRenderScale(0.9f);
 
-  // キーコールバック設定
+  // キー/マウスコールバック設定
   glfwSetKeyCallback(glfwWin, key_callback);
+  glfwSetScrollCallback(glfwWin, scroll_callback);
 
   // MoviePlayer を作成
   IMoviePlayer::InitParam param;
@@ -131,7 +158,7 @@ main(int argc, char *argv[])
 
 #if defined(TEST_DIB_MODE)
       // DIBの逆stride状態を想定したケース用
-      player->GetVideoFrame(pixels + w * (h - 1) * 4, w, h, -1 * w * );
+      player->GetVideoFrame(pixels + w * (h - 1) * 4, w, h, -1 * w *);
 #else
       player->GetVideoFrame(pixels, w, h, w * 4);
 #endif

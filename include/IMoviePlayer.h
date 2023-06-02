@@ -145,6 +145,10 @@ public:
   virtual bool IsAudioAvailable() const                  = 0;
   virtual void GetAudioFormat(AudioFormat *format) const = 0;
 
+  // audio volume
+  virtual void SetVolume(float volume) = 0;
+  virtual float Volume() const         = 0;
+
   // info
   virtual int64_t Duration() const = 0;
   virtual int64_t Position() const = 0;
