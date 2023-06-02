@@ -70,7 +70,7 @@ VorbisDecoder::Configure(const Config &conf)
     goto err;
   }
 
-  LOGV("codec initialized.\n");
+  // LOGV("codec initialized.\n");
 
   mIsConfigured = true;
   return true;
@@ -168,6 +168,10 @@ VorbisDecoder::DecodeFrame(DecodedBuffer *dcBuf, FramePacket *packet)
     dcBuf->dataSize = dataSize;
     memcpy(dcBuf->data, mDecodeBuf.data(), dataSize);
     // LOGV("decode audio: size=%llu, ts=%llu\n", dataSize, dcBuf->timeStampNs);
+  } else {
+    size_t dataSize = 0;
+    dcBuf->Resize(dataSize);
+    dcBuf->dataSize = dataSize;
   }
 
   return true;

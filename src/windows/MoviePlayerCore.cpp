@@ -23,8 +23,13 @@ MoviePlayerCore::Init()
   mHeight            = -1;
   mOutputPixelFormat = PIXEL_FORMAT_UNKNOWN;
 
-  mSawInputEOS  = false;
-  mSawOutputEOS = false;
+  mSawVideoInputEOS  = false;
+  mSawAudioInputEOS  = false;
+  mSawVideoOutputEOS = false;
+  mSawAudioOutputEOS = false;
+
+  mLastVideoFrameEnd = false;
+  mLastAudioFrameEnd = false;
 
   mIsLoop = false;
 
@@ -38,10 +43,13 @@ MoviePlayerCore::Init()
   mVideoFrameLastGet            = nullptr;
   mDummyFrame.InitByType(TRACK_TYPE_VIDEO, -1);
 
-  mAudioEngine      = nullptr;
-  mAudioQueuedBytes = 0;
-  mAudioDataPos     = 0;
-  mAudioUnitSize    = 0;
+  mAudioEngine       = nullptr;
+  mAudioQueuedBytes  = 0;
+  mAudioDataPos      = 0;
+  mAudioLastBufIndex = -1;
+  mAudioUnitSize     = 0;
+  mAudioOutputFrames = 0;
+  mAudioCodecDelayUs = 0;
   mAudioTime.Reset();
 }
 
@@ -254,7 +262,7 @@ MoviePlayerCore::Position() const
 {
   std::lock_guard<std::mutex> lock(mApiMutex);
 
-  return mClock.GetCurrentMediaTime();
+  return mClock.GetPresentationTime();
 }
 
 bool
@@ -291,9 +299,6 @@ MoviePlayerCore::SelectTargetTrack()
 
     switch (info.type) {
     case TRACK_TYPE_VIDEO: {
-      LOGV(" VIDEO: width=%d, height=%d, fps=%f\n", info.v.width, info.v.height,
-           info.v.frameRate);
-
       if (mVideoDecoder != nullptr) {
         // 複数ビデオトラックの場合は最初のトラックのみ対象とする
         continue;
@@ -331,11 +336,13 @@ MoviePlayerCore::SelectTargetTrack()
 
       mExtractor->SelectTrack(TRACK_TYPE_VIDEO, i);
 
+      if (mVideoDecoder) {
+        LOGV(" VIDEO: codec=%s, width=%d, height=%d, fps=%f\n",
+             mVideoDecoder->CodecName(), info.v.width, info.v.height, info.v.frameRate);
+      }
+
     } break;
     case TRACK_TYPE_AUDIO: {
-      LOGV(" AUDIO: channels=%d, sampleRate=%f, depth=%d\n", info.a.channels,
-           info.a.sampleRate, info.a.bitDepth);
-
       if (mAudioDecoder != nullptr) {
         // 複数オーディオトラックの場合は最初のトラックのみ対象とする
         continue;
@@ -360,6 +367,8 @@ MoviePlayerCore::SelectTargetTrack()
       }
       mExtractor->GetCodecPrivateData(i, config.privateData);
       mAudioDecoder->Configure(config);
+
+      mAudioCodecDelayUs = ns_to_us(info.a.codecDelay);
 
       // TODO AUDIO_FORMAT_S16 で固定。汎用にするならインタフェース追加
       AudioFormat audioFormat = AUDIO_FORMAT_S16;
@@ -388,6 +397,12 @@ MoviePlayerCore::SelectTargetTrack()
 
       mExtractor->SelectTrack(TRACK_TYPE_AUDIO, i);
 
+      if (mAudioDecoder) {
+        LOGV(" AUDIO: codec=%s, channels=%d, sampleRate=%f, depth=%d, codecDelay: %llu\n",
+             mAudioDecoder->CodecName(), info.a.channels, info.a.sampleRate,
+             info.a.bitDepth, mAudioCodecDelayUs);
+      }
+
     } break;
     default: // ignore
       break;
@@ -408,6 +423,7 @@ MoviePlayerCore::Open(const char *filepath)
   mClock.SetDuration(mExtractor->GetDurationUs());
 
   SelectTargetTrack();
+  InitStatusFlags();
   Start();
 
   // Play() がかかるまでプリロードする
@@ -417,13 +433,20 @@ MoviePlayerCore::Open(const char *filepath)
 }
 
 void
+MoviePlayerCore::InitStatusFlags()
+{
+  mSawVideoInputEOS = mSawVideoOutputEOS = mLastVideoFrameEnd = !IsVideoAvailable();
+  mSawAudioInputEOS = mSawAudioOutputEOS = mLastAudioFrameEnd = !IsAudioAvailable();
+}
+
+void
 MoviePlayerCore::DemuxInput()
 {
-  if (mSawInputEOS) {
+  if (mSawVideoInputEOS && mSawAudioInputEOS) {
     return;
   }
 
-  bool isPreloading  = CurrentStateIs(STATE_PRELOADING);
+  bool isPreloading  = IsCurrentState(STATE_PRELOADING);
   bool isInputFilled = false;
   bool reachedEOS    = false;
 
@@ -431,34 +454,63 @@ MoviePlayerCore::DemuxInput()
     Decoder *decoder = nullptr;
     TrackType type   = mExtractor->NextFramePacketType();
     switch (type) {
-    default:
     case TRACK_TYPE_VIDEO:
       decoder = mVideoDecoder;
-      // Vトラックあるのにデコーダが居ないのはバグなので捕まえておく
       ASSERT(decoder != nullptr, "BUG: invali video decoder.\n");
       break;
     case TRACK_TYPE_AUDIO:
       decoder = mAudioDecoder;
-      // Aトラックあるのにデコーダが居ないのはバグなので捕まえておく
       ASSERT(decoder != nullptr, "BUG: invali audio decoder.\n");
+      break;
+    case TRACK_TYPE_UNKNOWN:
+    default:
       break;
     }
 
-    // Extractor から Decoder への注入
-    int32_t packetIndex = decoder->DequeueFramePacketIndex();
-    if (packetIndex >= 0) {
-      // LOGV("*** Decode - deq write buf index = %d\n", packetIndex);
-      FramePacket *packet = decoder->GetFramePacket(packetIndex);
-      mExtractor->ReadSampleData(packet);
-      mSawInputEOS = packet->isEndOfStream;
-      decoder->QueueFramePacketIndex(packetIndex);
-      // LOGV("*** Decode - enq read buf index = %d\n", packetIndex);
-      mExtractor->Advance();
-    } else {
-      // V/A考慮していないが、多分Vの入力が埋まって入力プリロードは終了
-      isInputFilled = true;
+    int32_t packetIndex = -1;
+    if (decoder && !mExtractor->IsReachedEOS()) {
+      packetIndex = InputToDecoder(decoder, false);
+      if (packetIndex < 0) {
+        isInputFilled = true; // 入力プリロード終了
+      }
+    }
+
+    // 入力パケットを生成してEOSフラグを設定
+    if (mExtractor->IsReachedEOS()) {
+      if (IsVideoAvailable() && !mSawVideoInputEOS) {
+        // LOGV("video EOS\n");
+        packetIndex = InputToDecoder(mVideoDecoder, true);
+        if (packetIndex >= 0) {
+          mSawVideoInputEOS = true;
+        }
+      }
+      if (IsAudioAvailable() && !mSawAudioInputEOS) {
+        // LOGV("audio EOS\n");
+        packetIndex = InputToDecoder(mAudioDecoder, true);
+        if (packetIndex >= 0) {
+          mSawAudioInputEOS = true;
+        }
+      }
     }
   } while (isPreloading && !isInputFilled);
+}
+
+int32_t
+MoviePlayerCore::InputToDecoder(Decoder *decoder, bool inputIsEOS)
+{
+  int32_t packetIndex = decoder->DequeueFramePacketIndex();
+  if (packetIndex >= 0) {
+    FramePacket *packet = decoder->GetFramePacket(packetIndex);
+    if (inputIsEOS) {
+      packet->InitAsEOS();
+    } else {
+      mExtractor->ReadSampleData(packet);
+      mExtractor->Advance();
+    }
+    decoder->QueueFramePacketIndex(packetIndex);
+  }
+
+  return packetIndex;
 }
 
 void
@@ -468,11 +520,7 @@ MoviePlayerCore::HandleVideoOutput()
     return;
   }
 
-  if (mSawOutputEOS) {
-    return;
-  }
-
-  bool isPreloading     = CurrentStateIs(STATE_PRELOADING);
+  bool isPreloading     = IsCurrentState(STATE_PRELOADING);
   bool isFrameReady     = false;
   bool isFirstOfPreload = isPreloading;
   bool isFrameSkipping  = false;
@@ -480,15 +528,17 @@ MoviePlayerCore::HandleVideoOutput()
 
   do {
     // 次フレームが未セットならデコード出力を吸い上げ
-    if (mVideoFrameNext == nullptr) {
+    if (!mSawVideoOutputEOS && mVideoFrameNext == nullptr) {
       dcBufIndex = mVideoDecoder->DequeueDecodedBufferIndex();
       if (dcBufIndex >= 0) {
         DecodedBuffer *buf = mVideoDecoder->GetDecodedBuffer(dcBufIndex);
-        mSawOutputEOS |= buf->isEndOfStream;
+        mSawVideoOutputEOS = buf->isEndOfStream;
         if (!buf->isEndOfStream) {
           if (buf->dataSize > 0) {
             SetVideoFrameNext(buf);
           }
+        } else {
+          // LOGV("output EOS: video\n");
         }
       } else if (isFrameSkipping) {
         // フレームスキップ解消中にデコード結果を吸い上げきった
@@ -500,34 +550,41 @@ MoviePlayerCore::HandleVideoOutput()
     if (mVideoFrameNext) {
       isFrameSkipping = false;
 
-      int64_t timeDiff   = -1;
-      int64_t nextTimeUs = ns_to_us(mVideoFrameNext->timeStampNs);
       if (isFirstOfPreload) {
         // プリロード時の初回は強制的にDecodedFrame更新
         UpdateVideoFrameToNext();
         isFirstOfPreload = false;
         isFrameReady     = true;
       } else if (mClock.IsStarted()) {
-        if (IsAudioAvailable()) {
-          timeDiff = mClock.CalcDiffFromMediaTime(nextTimeUs);
-        } else {
-          timeDiff = mClock.CalcDiffFromSystemTime(nextTimeUs);
-        }
-        // LOGV("frame diff time=%lld\n", timeDiff);
-
         // フレームスキップ判断のスレッショルド: 1/2フレーム遅れたら飛ばす
         int64_t frameSkipThresh = s_to_us(1 / mFrameRate / 2);
+        int64_t timeDiff        = CalcDiffVideoTimeAndNow(mVideoFrameNext);
         if (timeDiff >= frameSkipThresh) {
           // フレームスキップ
-          LOGV("*** video frame skipped: pts=%lld media=%lld sys=%lldus ***\n",
-               nextTimeUs, mClock.GetCurrentMediaTime(), mClock.GetCurrentSystemTime());
+          LOGV("*** video frame skipped: frame=%lld, pts=%lld, diff=%lld, thresh=%lld\n",
+               mVideoFrameNext->frame, ns_to_us(mVideoFrameNext->timeStampNs), timeDiff,
+               frameSkipThresh);
           SetVideoFrameNext(nullptr);
           isFrameSkipping = true;
         } else if (timeDiff >= 0) {
           // 出力ビデオフレーム更新
+          // LOGV("video update: pts=%lld, diff=%lld\n",
+          //      ns_to_us(mVideoFrameNext->timeStampNs), timeDiff);
           UpdateVideoFrameToNext();
           isFrameReady = true;
         }
+      }
+    }
+
+    // デコード吸い上げが完了＆次フレームが空の状態ならば
+    // 最終ビデオフレームなのでエンドタイムをチェックして
+    // 終了フラグを立てる
+    if (mSawVideoOutputEOS && mVideoFrameNext == nullptr) {
+      // LOGV("video last frame\n");
+      int64_t timeDiff = CalcDiffVideoTimeAndNow(mVideoFrame);
+      if (timeDiff >= 0) {
+        // LOGV("video last frame END\n");
+        mLastVideoFrameEnd = true;
       }
     }
 
@@ -541,11 +598,11 @@ MoviePlayerCore::HandleAudioOutput()
     return;
   }
 
-  if (mSawOutputEOS) {
+  if (mSawAudioOutputEOS) {
     return;
   }
 
-  bool isPreloading  = CurrentStateIs(STATE_PRELOADING);
+  bool isPreloading  = IsCurrentState(STATE_PRELOADING);
   bool isFrameReady  = false;
   int32_t dcBufIndex = -1;
 
@@ -553,12 +610,11 @@ MoviePlayerCore::HandleAudioOutput()
     dcBufIndex = mAudioDecoder->DequeueDecodedBufferIndex();
     if (dcBufIndex >= 0) {
       DecodedBuffer *buf = mAudioDecoder->GetDecodedBuffer(dcBufIndex);
-      mSawOutputEOS |= buf->isEndOfStream;
-      if (!buf->isEndOfStream) {
-        if (buf->dataSize > 0) {
-          EnqueueAudio(buf);
-          isFrameReady = true;
-        }
+      mSawAudioOutputEOS = buf->isEndOfStream;
+      if (buf->dataSize > 0 || buf->isEndOfStream) {
+        // EOSバッファも終了確認マーカーとしてキューイングする
+        EnqueueAudio(buf);
+        isFrameReady = true;
       }
     }
   } while (isPreloading && !isFrameReady);
@@ -571,23 +627,19 @@ MoviePlayerCore::Decode()
   HandleVideoOutput();
   HandleAudioOutput();
 
-  if (CurrentStateIs(STATE_PRELOADING)) {
+  if (IsCurrentState(STATE_PRELOADING)) {
     return;
   }
 
-  bool isMovieDone = false;
-  if (mSawInputEOS && mSawOutputEOS) {
-    // ラストフレームの持続時間をケアした再生完走判定
-    int64_t endTimeUs = mClock.GetEndSystemTime();
-    int64_t nowUs     = mClock.GetCurrentSystemTime();
-    isMovieDone       = (nowUs >= endTimeUs);
-  }
+  bool sawInputEOS  = mSawVideoInputEOS && mSawAudioInputEOS;
+  bool sawOutputEOS = mSawVideoOutputEOS && mSawAudioOutputEOS;
+  bool lastFrameEnd = mLastVideoFrameEnd && mLastAudioFrameEnd;
 
+  bool isMovieDone = (sawInputEOS && sawOutputEOS && lastFrameEnd);
   if (isMovieDone) {
     if (mIsLoop) {
       LOGV("---- Loop ----\n");
       Post(MSG_SEEK, 0);
-      // Post(MSG_PRELOAD);
       Post(MSG_DECODE);
     } else {
       Post(MSG_STOP);
@@ -690,8 +742,10 @@ MoviePlayerCore::Flush()
       mAudioFrameQueue.pop();
       mAudioDecoder->ReleaseDecodedBufferIndex(buf->bufIndex);
     }
-    mAudioQueuedBytes = 0;
-    mAudioDataPos     = 0;
+    mAudioQueuedBytes  = 0;
+    mAudioDataPos      = 0;
+    mAudioOutputFrames = 0;
+    mAudioLastBufIndex = -1;
     mAudioTime.Reset();
   }
 
@@ -703,10 +757,12 @@ MoviePlayerCore::Flush()
     mAudioDecoder->FlushSync();
   }
 
-  mClock.Reset();
+  mClock.ClearStartMediaTime();
+  mClock.ClearAnchorTime();
 
-  mSawInputEOS  = false;
-  mSawOutputEOS = false;
+  InitStatusFlags();
+
+  mLastVideoFrameEnd = false;
 }
 
 void
@@ -739,11 +795,17 @@ MoviePlayerCore::SetVideoFrame(DecodedBuffer *newFrame)
     // 新フレームがダミーフレームではなく、
     // Audioトラックがない場合は、メディアタイムをビデオフレームのPTSで更新
     if (!IsAudioAvailable() && newFrame != &mDummyFrame) {
-      int64_t mediaTimeNs = ns_to_us(mVideoFrame->timeStampNs);
-      mClock.SetCurrentMediaTime(ns_to_us(mediaTimeNs));
+      int64_t mediaTimeUs = ns_to_us(mVideoFrame->timeStampNs);
       if (!mClock.IsStarted()) {
-        mClock.SetStartTime(mediaTimeNs);
+        mClock.SetStartMediaTime(mediaTimeUs);
       }
+      mClock.SetPresentationTime(mediaTimeUs);
+
+      int64_t nowUs          = get_time_us();
+      int64_t nowMediaUs     = mediaTimeUs;
+      int64_t durationUs     = s_to_us(1.0 / mFrameRate);
+      int64_t maxMediaTimeUs = mediaTimeUs + durationUs;
+      mClock.UpdateAnchorTime(nowMediaUs, nowUs, maxMediaTimeUs);
     }
   }
 }
@@ -780,6 +842,20 @@ MoviePlayerCore::GetVideoFrame(const DecodedBuffer **videoFrame)
   }
 }
 
+int64_t
+MoviePlayerCore::CalcDiffVideoTimeAndNow(DecodedBuffer *targetFrame) const
+{
+  if (!targetFrame) {
+    return -1;
+  }
+
+  int64_t mediaUs    = ns_to_us(targetFrame->timeStampNs);
+  int64_t nextRealUs = mClock.GetRealTimeFor(mediaUs);
+  int64_t nowUs      = get_time_us();
+
+  return nowUs - nextRealUs;
+}
+
 void
 MoviePlayerCore::EnqueueAudio(DecodedBuffer *buf)
 {
@@ -795,10 +871,10 @@ MoviePlayerCore::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *fr
 {
   bool hasNewFrame    = false;
   uint64_t readFrames = 0;
-  uint64_t mediaTime  = 0;
+  int64_t mediaTimeUs = 0;
 
-  // プリロード中は出力を行わない
-  if (GetState() == STATE_PRELOADING) {
+  // プリロード中と完走後にリセットされるまでの期間は出力を行わない
+  if (GetState() == STATE_PRELOADING || mLastAudioFrameEnd) {
     readFrames  = 0;
     hasNewFrame = false;
     goto out;
@@ -807,41 +883,48 @@ MoviePlayerCore::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *fr
   if (IsAudioAvailable()) {
     std::lock_guard<std::mutex> lock(mAudioFrameMutex);
 
-    // 要求を満たす量の出力がない
-    uint64_t reqBytes = frameCount * mAudioUnitSize;
-    if (mAudioQueuedBytes < reqBytes) {
-      readFrames  = 0;
-      hasNewFrame = false;
-      goto out;
-    }
-
+    uint64_t reqBytes     = frameCount * mAudioUnitSize;
     uint8_t *dst          = frames;
     uint64_t bytesToRead  = reqBytes;
     uint64_t timeBase     = mAudioTime.base;
-    uint64_t timeOffset   = mAudioTime.offset;
-    uint64_t nextTimeBase = 0;
+    uint64_t outputFrames = mAudioTime.outputFrames;
+
+    uint64_t nextOutputFrames = outputFrames;
+    uint64_t nextTimeBase     = 0;
 
     bool first = true;
     while (bytesToRead > 0 && mAudioFrameQueue.size() > 0) {
       const DecodedBuffer *data = mAudioFrameQueue.front();
 
+      // EOSバッファはフラグのみの空バッファなので打ち切り
+      if (data->isEndOfStream) {
+        // LOGV("audio last frame END\n");
+        mLastAudioFrameEnd = true;
+        break;
+      }
+
       if (first) {
-        // case1 前回がバッファをちょうど使い切って今回新バッファから
-        // case2 seekで飛んだ
-        // どちらにしても状況的にオフセットは先頭から始まるので常に0。
+        // 初回のみ前回からバッファのPTSが変わってる場合にbase更新
         if (timeBase != data->timeStampNs) {
-          timeBase   = data->timeStampNs;
-          timeOffset = 0;
+          timeBase         = data->timeStampNs;
+          outputFrames     = 0;
+          nextOutputFrames = 0;
         }
         first = false;
+      } else {
+        // 初回以外でPTSが変わっていればnextOutputFramesをリセット
+        if (nextTimeBase != data->timeStampNs) {
+          nextOutputFrames = 0;
+        }
       }
       nextTimeBase = data->timeStampNs;
 
-      int remain = data->dataSize - mAudioDataPos;
+      uint64_t frames = 0;
+      int remain      = data->dataSize - mAudioDataPos;
       if (bytesToRead < remain) {
         memcpy(dst, data->data + mAudioDataPos, bytesToRead);
         dst += bytesToRead;
-        readFrames += (bytesToRead / mAudioUnitSize);
+        frames = (bytesToRead / mAudioUnitSize);
         mAudioDataPos += bytesToRead;
         bytesToRead = 0;
       } else {
@@ -849,31 +932,63 @@ MoviePlayerCore::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *fr
         mAudioFrameQueue.pop();
         mAudioDecoder->ReleaseDecodedBufferIndex(data->bufIndex);
         dst += remain;
-        readFrames += (remain / mAudioUnitSize);
-        mAudioDataPos = 0;
+        frames = (remain / mAudioUnitSize);
         bytesToRead -= remain;
+        mAudioDataPos = 0;
       }
+      readFrames += frames;
+      nextOutputFrames += frames;
     }
-    mAudioQueuedBytes -= reqBytes;
+    mAudioQueuedBytes -= (reqBytes - bytesToRead);
     hasNewFrame = true;
 
-    // LOGV("readed: %lld, pos: %lld\n", reqBytes, pos);
-
-    mediaTime = ns_to_us(timeBase + timeOffset);
-    mClock.SetCurrentMediaTime(mediaTime);
-    if (!mClock.IsStarted()) {
-      mClock.SetStartTime(mediaTime);
+    // 最終かつ読み込みが0フレームだった場合
+    if (mLastAudioFrameEnd && readFrames == 0) {
+      readFrames  = 0;
+      hasNewFrame = false;
+      goto out;
     }
 
-    mAudioTime.base = nextTimeBase;
-    mAudioTime.offset =
-      mAudioDataPos * 1'000'000'000 / (mAudioDecoder->SampleRate() * mAudioUnitSize);
+    // 不足分は無音で埋める
+    // TODO S16以外では無音が0でない可能性がある。S16以外に対応する場合は注意
+    if (bytesToRead > 0) {
+      memset(dst, 0, bytesToRead);
+      readFrames += (bytesToRead / mAudioUnitSize);
+      ASSERT(readFrames == frameCount, "BUG: invalid audio frame count.\n");
+    }
+
+    // 現状では、ここが呼ばれた時点でそこまでの送出フレームが
+    // 再生されきった状態とみなす。より正確にするには、使用している
+    // オーディオエンジンの現在の再生位置を取得する必要がある。
+    int64_t sampleRate = mAudioDecoder->SampleRate();
+    int64_t timeOffset = calc_audio_duration_us(outputFrames, sampleRate);
+    mediaTimeUs        = ns_to_us(timeBase) + timeOffset - mAudioCodecDelayUs;
+    if (mediaTimeUs >= 0) {
+      if (!mClock.IsStarted()) {
+        mClock.SetStartMediaTime(mediaTimeUs);
+      }
+      mClock.SetPresentationTime(mediaTimeUs);
+
+      int64_t durationUs     = calc_audio_duration_us(readFrames, sampleRate);
+      int64_t maxMediaTimeUs = mediaTimeUs + durationUs;
+      int64_t nowUs          = get_time_us();
+      int64_t nowMediaUs     = mClock.GetStartMediaTime() +
+                           calc_audio_duration_us(mAudioOutputFrames, sampleRate);
+      mClock.UpdateAnchorTime(nowMediaUs, nowUs, maxMediaTimeUs);
+    } else {
+      // negative timeはpresentationしてはいけないとmkv仕様書に記載なので読み捨て
+      // (作り上メモリコピーしちゃってるけど、framesReadをいじって対応)
+      readFrames  = 0;
+      hasNewFrame = false;
+      // LOGV("* negative pts *\n");
+    }
+
+    mAudioTime.base         = nextTimeBase;
+    mAudioTime.outputFrames = nextOutputFrames;
 
 #if 0 // DEBUG
-    LOGV("time=%lld, base=%lld, offset=%lld\n", timeBase + timeOffset, timeBase,
+    LOGV("time=%lld, base=%lld, offset=%lld\n", mediaTimeUs, ns_to_us(timeBase),
          timeOffset);
-    LOGV("next: time=%lld, base=%lld, offset=%lld\n", mAudioTime.base + mAudioTime.offset,
-         mAudioTime.base, mAudioTime.offset);
 #endif
   } else {
     // 音声トラックがない
@@ -882,12 +997,13 @@ MoviePlayerCore::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *fr
   }
 
 out:
+  mAudioOutputFrames += readFrames;
   if (framesRead) {
     *framesRead = readFrames;
   }
 
   if (timeStampUs) {
-    *timeStampUs = mediaTime;
+    *timeStampUs = mediaTimeUs;
   }
 
   return hasNewFrame;
@@ -907,7 +1023,6 @@ MoviePlayerCore::SetState(State newState)
   if (mAudioEngine) {
     switch (newState) {
     case STATE_PLAY:
-      // mClock.SetStartTime();
       mAudioEngine->Start();
       break;
     case STATE_PAUSE:
@@ -932,7 +1047,7 @@ MoviePlayerCore::GetState() const
 }
 
 bool
-MoviePlayerCore::CurrentStateIs(State state) const
+MoviePlayerCore::IsCurrentState(State state) const
 {
   return GetState() == state;
 }

@@ -66,6 +66,7 @@ add_library(${PROJ_NAME} STATIC
 	src/common/MessageLooper.cpp
 	src/common/PixelConvert.cpp
 	src/common/AudioEngine.cpp
+	src/common/MediaClock.cpp
 	src/windows/Decoder.cpp
 	src/windows/VpxDecoder.cpp
 	src/windows/VorbisDecoder.cpp

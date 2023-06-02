@@ -21,7 +21,7 @@ public:
   virtual bool Done() override;
   virtual bool DecodeFrame(DecodedBuffer *dcBuf, FramePacket *packet) override;
 
-  virtual const char *CodecName() const { return "vpx"; }
+  virtual const char *CodecName() const;
 
   virtual PixelFormat OutputPixelFormat() const;
 

@@ -141,6 +141,19 @@ enum AudioFormat
   AUDIO_FORMAT_F32,
 };
 
+// オーディオフレーム列のdurationを計算する
+inline int64_t
+calc_audio_duration_us(int64_t frameCount, int64_t sampleRate)
+{
+  return (frameCount * 1'000'000 / sampleRate);
+}
+
+inline int64_t
+calc_audio_duration_ns(int64_t frameCount, int64_t sampleRate)
+{
+  return (frameCount * 1'000'000'000 / sampleRate);
+}
+
 // -----------------------------------------------------------------------------
 // internal pixel format
 // -----------------------------------------------------------------------------

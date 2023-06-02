@@ -28,6 +28,7 @@ struct TrackInfo
       int32_t channels;
       int32_t bitDepth;
       float sampleRate;
+      uint64_t codecDelay;
     } a;
   };
 };

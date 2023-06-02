@@ -34,15 +34,15 @@
 
 #else // !ANDROID
 #include <cstdio>
-#define LOGV(...)               \
-  {                             \
+#define LOGV(...)              \
+  {                            \
     printf("%s: ", MYLOG_TAG); \
-    printf(__VA_ARGS__);        \
+    printf(__VA_ARGS__);       \
   }
-#define LOGE(...)                    \
-  {                                  \
+#define LOGE(...)                   \
+  {                                 \
     printf("%s: ERR: ", MYLOG_TAG); \
-    printf(__VA_ARGS__);             \
+    printf(__VA_ARGS__);            \
   }
 #define ASSERT(exp, ...) \
   if (!(exp)) {          \
@@ -56,6 +56,7 @@
 // #define DEBUG_INFO_PACKET      // 入力パケット情報
 // #define DEBUG_INFO_DECODER     // デコーダ情報
 // #define DEBUG_INFO_CUES        // キュー(キーフレーム)情報
+// #define DEBUG_INFO_MEDIACLOCK // MEdiaClock情報
 #endif
 
 #else

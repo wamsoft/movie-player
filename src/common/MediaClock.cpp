@@ -3,19 +3,19 @@
 #include "CommonUtils.h"
 #include "MediaClock.h"
 
-// -----------------------------------------------------------------------------
-// MediaClock
-// -----------------------------------------------------------------------------
 MediaClock::MediaClock()
 : mDurationUs(-1)
-, mStartMediaTimeUs(-1)
-, mStartSystemTimeUs(-1)
+, mPresentationTimeUs(-1)
 , mAnchorMediaTimeUs(-1)
-, mAnchorSystemTimeUs(-1)
-, mResetCount(0)
+, mAnchorRealTimeUs(-1)
+, mMaxMediaTimeUs(INT64_MAX)
+, mStartMediaTimeUs(-1)
 {}
 
-MediaClock::~MediaClock() {}
+MediaClock::~MediaClock()
+{
+  Reset();
+}
 
 void
 MediaClock::Reset()
@@ -23,12 +23,29 @@ MediaClock::Reset()
   std::lock_guard<std::mutex> lock(mLock);
 
   mDurationUs         = -1;
-  mStartMediaTimeUs   = -1;
-  mStartSystemTimeUs  = -1;
-  mAnchorMediaTimeUs  = -1;
-  mAnchorSystemTimeUs = -1;
+  mPresentationTimeUs = -1;
 
-  mResetCount++;
+  mStartMediaTimeUs  = -1;
+  mStartSystemTimeUs = -1;
+  mMaxMediaTimeUs    = INT64_MAX;
+
+  mAnchorMediaTimeUs = -1;
+  mAnchorRealTimeUs  = -1;
+  mPlaybackRate      = 1.0;
+}
+
+bool
+MediaClock::IsStarted() const
+{
+  std::lock_guard<std::mutex> lock(mLock);
+
+  return is_started();
+}
+
+bool
+MediaClock::is_started() const
+{
+  return (mStartMediaTimeUs >= 0 && mAnchorMediaTimeUs >= 0);
 }
 
 void
@@ -45,6 +62,40 @@ MediaClock::GetDuration() const
   std::lock_guard<std::mutex> lock(mLock);
 
   return mDurationUs;
+}
+
+void
+MediaClock::SetPresentationTime(int64_t ptsUs)
+{
+  std::lock_guard<std::mutex> lock(mLock);
+
+  if (ptsUs >= mDurationUs) {
+    // LOGV("presentation time exceeds the duration: %lld / %lld\n", ptsUs, mDurationUs);
+    ptsUs = mDurationUs;
+  }
+
+  mPresentationTimeUs = ptsUs;
+
+#if defined(DEBUG_INFO_MEDIACLOCK)
+  LOGV("set pts:%lld\n", mPresentationTimeUs);
+#endif
+}
+
+int64_t
+MediaClock::GetPresentationTime() const
+{
+  std::lock_guard<std::mutex> lock(mLock);
+
+  return mPresentationTimeUs;
+}
+
+void
+MediaClock::SetStartMediaTime(int64_t mediaUs)
+{
+  std::lock_guard<std::mutex> lock(mLock);
+
+  mStartSystemTimeUs = get_time_us();
+  mStartMediaTimeUs  = mediaUs;
 }
 
 int64_t
@@ -64,59 +115,108 @@ MediaClock::GetStartMediaTime() const
 }
 
 void
-MediaClock::SetStartTime(int64_t startMediaTimeUs, int64_t startSystemTimeUs)
+MediaClock::ClearStartMediaTime()
 {
   std::lock_guard<std::mutex> lock(mLock);
 
-  if (startSystemTimeUs < 0) {
-    startSystemTimeUs = get_time_us();
-  }
-  mStartSystemTimeUs = startSystemTimeUs - startMediaTimeUs;
-  mStartMediaTimeUs  = startMediaTimeUs;
+  mStartSystemTimeUs = -1;
+  mStartMediaTimeUs  = -1;
 }
 
 void
-MediaClock::SetAnchorTime(int64_t anchorMediaTimeUs, int64_t anchorSystemTimeUs)
+MediaClock::ClearAnchorTime()
 {
-  if (anchorMediaTimeUs < 0 || anchorSystemTimeUs < 0) {
-    ASSERT(false, "BUG: invalid anchor time set.\n");
+  std::lock_guard<std::mutex> lock(mLock);
+
+  mAnchorMediaTimeUs = -1;
+  mAnchorRealTimeUs  = -1;
+}
+
+bool
+MediaClock::UpdateAnchorTime(int64_t mediaUs, int64_t realUs, int64_t maxMediaUs)
+{
+  if (mediaUs < 0 || realUs < 0) {
+    LOGE("negative anchor time is not allowed.\n");
+    return false;
+  }
+
+  std::lock_guard<std::mutex> lock(mLock);
+
+  int64_t nowUs      = get_time_us();
+  int64_t nowMediaUs = mediaUs + (realUs - realUs) * (double)mPlaybackRate;
+
+  mAnchorMediaTimeUs = nowMediaUs;
+  mAnchorRealTimeUs  = nowUs;
+  mMaxMediaTimeUs    = maxMediaUs;
+
+#if defined(DEBUG_INFO_MEDIACLOCK)
+  LOGV("anchor_m:%lld, anchor_r:%lld, max_m:%lld\n", mAnchorMediaTimeUs,
+       mAnchorRealTimeUs, mMaxMediaTimeUs);
+#endif
+
+  return true;
+}
+
+void
+MediaClock::SetPlaybackRate(float rate)
+{
+  std::lock_guard<std::mutex> lock(mLock);
+
+  if (mAnchorRealTimeUs == -1) {
+    mPlaybackRate = rate;
     return;
   }
 
-  std::lock_guard<std::mutex> lock(mLock);
+  int64_t nowUs = get_time_us();
+  int64_t nowMediaUs =
+    mAnchorMediaTimeUs + (nowUs - mAnchorRealTimeUs) * (double)mPlaybackRate;
 
-  if (anchorSystemTimeUs < 0) {
-    anchorSystemTimeUs = get_time_us();
-  }
-  mAnchorSystemTimeUs = anchorSystemTimeUs;
-  mAnchorMediaTimeUs  = anchorMediaTimeUs;
+  mAnchorMediaTimeUs = nowMediaUs;
+  mAnchorRealTimeUs  = nowUs;
+  mPlaybackRate      = rate;
 }
 
-int64_t
-MediaClock::CalcDiffFromMediaTime(int64_t myTimeUs)
+float
+MediaClock::GetPlaybackRate() const
 {
   std::lock_guard<std::mutex> lock(mLock);
 
-  if (!is_started()) {
-    assert(false);
-    INLINE_LOGE("BUG?: CalcDiffFromMediaTime(): start time is not set.\n");
-    return -1;
-  }
-
-  return mAnchorMediaTimeUs - myTimeUs;
+  return mPlaybackRate;
 }
 
 int64_t
-MediaClock::CalcDiffFromSystemTime(int64_t myTimeUs)
+MediaClock::GetMediaTime(int64_t realUs) const
 {
   std::lock_guard<std::mutex> lock(mLock);
 
-  if (!is_started()) {
-    assert(false);
-    INLINE_LOGE("BUG?: CalcDiffFromMediaTime(): start time is not set.\n");
-    return -1;
+  return get_media_time(realUs);
+}
+
+int64_t
+MediaClock::get_media_time(int64_t realUs) const
+{
+  int64_t mediaUs =
+    mAnchorMediaTimeUs + (realUs - mAnchorRealTimeUs) * (double)mPlaybackRate;
+  if (mediaUs < mStartMediaTimeUs) {
+    mediaUs = mStartMediaTimeUs;
+  } else if (mediaUs < 0) {
+    mediaUs = 0;
   }
 
-  int64_t nowSysTimeUs = get_time_us();
-  return nowSysTimeUs - (mStartSystemTimeUs + myTimeUs);
+  return mediaUs;
+}
+
+int64_t
+MediaClock::GetRealTimeFor(int64_t targetMediaUs) const
+{
+  std::lock_guard<std::mutex> lock(mLock);
+
+  if (mPlaybackRate == 0.0) {
+    return -1; // avoid divide by zero
+  }
+
+  int64_t nowUs      = get_time_us();
+  int64_t nowMediaUs = get_media_time(nowUs);
+
+  return (targetMediaUs - nowMediaUs) / (double)mPlaybackRate + nowUs;
 }

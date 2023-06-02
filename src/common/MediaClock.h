@@ -9,176 +9,48 @@
 class MediaClock
 {
 public:
-  MediaClock()
-  : mDurationUs(-1)
-  , mStartMediaTimeUs(-1)
-  , mStartSystemTimeUs(-1)
-  {}
-  ~MediaClock() {}
+  MediaClock();
+  ~MediaClock();
 
-  void Reset()
-  {
-    std::lock_guard<std::mutex> lock(mLock);
+  void Reset();
 
-    mStartMediaTimeUs  = -1;
-    mStartSystemTimeUs = -1;
-  }
+  bool IsStarted() const;
 
-  void SetDuration(int64_t mediaDurationUs)
-  {
-    std::lock_guard<std::mutex> lock(mLock);
+  void SetDuration(int64_t mediaDurationUs);
+  int64_t GetDuration() const;
 
-    mDurationUs = mediaDurationUs;
-  }
+  void SetPresentationTime(int64_t ptsUs);
+  int64_t GetPresentationTime() const;
 
-  int64_t GetDuration() const
-  {
-    std::lock_guard<std::mutex> lock(mLock);
+  void SetPlaybackRate(float rate);
+  float GetPlaybackRate() const;
 
-    return mDurationUs;
-  }
+  void SetStartMediaTime(int64_t mediaUs);
+  int64_t GetStartSystemTime() const;
+  int64_t GetStartMediaTime() const;
+  void ClearStartMediaTime();
 
-  void SetStartTime(int64_t startMediaTimeUs = 0, int64_t nowUs = -1)
-  {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    if (nowUs < 0) {
-      nowUs = get_time_us();
-    }
-    mStartSystemTimeUs = nowUs - startMediaTimeUs;
-    mStartMediaTimeUs  = startMediaTimeUs;
-  }
-
-  void SetStartMediaTime(int64_t startMediaTimeUs)
-  {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    mStartMediaTimeUs  = startMediaTimeUs;
-  }
-
-  void SetStartSystemTime(int64_t nowUs = -1)
-  {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    if (nowUs < 0) {
-      nowUs = get_time_us();
-    }
-    mStartSystemTimeUs = nowUs;
-  }
-
-  int64_t GetStartSystemTime() const
-  {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    return mStartSystemTimeUs;
-  }
-
-  int64_t GetStartMediaTime() const
-  {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    return mStartMediaTimeUs;
-  }
-
-  void UpdateStartTime(int64_t startMediaTimeUs) { SetStartTime(startMediaTimeUs); }
-
-  void ClearStartSystemTime()
-  {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    mStartSystemTimeUs = -1;
-  }
-
-  void ClearStartMediaTime()
-  {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    mStartMediaTimeUs  = -1;
-  }
-
-  // 自分のTimeと現在のメディアタイムとの差を計算する
-  // Audioがある環境で、Videoフレームの更新タイミングをAudio PTSから計算するために使用
-  int64_t CalcDiffFromMediaTime(int64_t myTimeUs)
-  {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    if (!is_started()) {
-      assert(false);
-      INLINE_LOGE("BUG?: CalcDiffFromMediaTime(): start time is not set.\n");
-      return -1;
-    }
-
-    return mCurrentMediaTimeUs - myTimeUs;
-  }
-
-  // 自分のTimeと現在のシステム時間との差を計算する
-  // Audioが無い環境で、Videoフレームの更新タイミングを計算するために使用
-  int64_t CalcDiffFromSystemTime(int64_t myTimeUs)
-  {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    if (!is_started()) {
-      assert(false);
-      INLINE_LOGE("BUG?: CalcDiffFromMediaTime(): start time is not set.\n");
-      return -1;
-    }
-
-    int64_t nowSysTimeUs = get_time_us();
-    return nowSysTimeUs - (mStartSystemTimeUs + myTimeUs);
-  }
-
-  bool IsStarted() const
-  {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    return is_started();
-  }
-
-  void SetCurrentMediaTime(int64_t currentMediaTimeUS)
-  {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    mCurrentMediaTimeUs = currentMediaTimeUS;
-  }
-
-  int64_t GetCurrentMediaTime() const
-  {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    return mCurrentMediaTimeUs;
-  }
-
-  int64_t GetCurrentSystemTime() const { return get_time_us(); }
-
-  int64_t GetEndSystemTime() const { return mStartSystemTimeUs + mDurationUs; }
-
-#if 0 // TODO OBSOLETE
-  int64_t CalcDelay(int64_t mediaTimeUs, int64_t nowUs = -1)
-  {
-    std::lock_guard<std::mutex> lock(mLock);
-
-    if (!is_started()) {
-      assert(false);
-      INLINE_LOGE("BUG?: CalcDelay(): start time is not set.\n");
-      return -1;
-    }
-
-    if (nowUs < 0) {
-      nowUs = get_time_us();
-    }
-
-    return (mStartSystemTimeUs + mediaTimeUs) - nowUs;
-  }
-#endif
+  void ClearAnchorTime();
+  bool UpdateAnchorTime(int64_t mediaUs, int64_t realUs, int64_t maxMediaUs = INT64_MAX);
+  int64_t GetMediaTime(int64_t realUs) const;
+  int64_t GetRealTimeFor(int64_t targetMediaUs) const;
 
 private:
-  bool is_started() const { return (mStartMediaTimeUs >= 0 && mStartSystemTimeUs >= 0); }
+  bool is_started() const;
+  int64_t get_media_time(int64_t realUs) const;
 
 private:
   mutable std::mutex mLock;
 
   int64_t mDurationUs;
+  int64_t mPresentationTimeUs;
+
   int64_t mStartMediaTimeUs;
   int64_t mStartSystemTimeUs;
-  int64_t mCurrentMediaTimeUs;
+
+  int64_t mAnchorMediaTimeUs;
+  int64_t mAnchorRealTimeUs;
+  int64_t mMaxMediaTimeUs;
+
+  float mPlaybackRate;
 };

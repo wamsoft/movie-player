@@ -164,7 +164,7 @@ void
 Decoder::Decode()
 {
   if (mIsInpuEOS) {
-    // LOGV("Decoder::Decode: Input reached EOS\n");
+    // LOGV("Decoder::Decode: %s: Input reached EOS\n", CodecName());
     return;
   }
 
@@ -202,8 +202,8 @@ Decoder::Decode()
           // LOGV("r enq: %d\n", dcBufIndex);
         }
 
-        if (dcBuf->data && dcBuf->dataSize > 0) {
-          // デコード結果をリーダーバッファへ追加
+        if ((dcBuf->data && dcBuf->dataSize > 0) || dcBuf->isEndOfStream) {
+          // デコード結果をリーダーバッファへ追加。EOSも対象。
           mDecodedBuffers.EnqueueBufferIndexForReader(dcBufIndex);
           // LOGV("enqueue decode: %d\n", dcBufIndex);
         } else {

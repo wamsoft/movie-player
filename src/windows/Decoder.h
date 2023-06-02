@@ -78,6 +78,8 @@ struct DecodedBuffer : public BufferQueueEntryBase
   void InitAsEOS(int32_t bufIdx)
   {
     Init(bufIdx);
+    Resize(0);
+    dataSize      = 0;
     isEndOfStream = true;
   }
 

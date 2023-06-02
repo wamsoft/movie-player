@@ -36,6 +36,19 @@ VpxDecoder::~VpxDecoder()
   mIsConfigured = false;
 }
 
+const char *
+VpxDecoder::CodecName() const
+{
+  switch (mCodecId) {
+  case CODEC_V_VP8:
+    return "vp8";
+  case CODEC_V_VP9:
+    return "vp9";
+  default:
+    return "vpx[unknown]";
+  }
+}
+
 void
 VpxDecoder::CodecErrorMessage(const char *msg)
 {

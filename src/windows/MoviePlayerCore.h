@@ -81,22 +81,25 @@ public:
 protected:
   virtual void HandleMessage(int32_t what, int64_t arg, void *data) override;
 
+  void InitStatusFlags();
   void SelectTargetTrack();
   void Start();
   void Decode();
   void DemuxInput();
+  int32_t InputToDecoder(Decoder *decoder, bool inputIsEOS);
   void HandleVideoOutput();
   void HandleAudioOutput();
   void Flush();
 
   void SetState(State newState);
   State GetState() const;
-  bool CurrentStateIs(State state) const;
+  bool IsCurrentState(State state) const;
 
   void InitDummyFrame();
   void UpdateVideoFrameToNext();
   void SetVideoFrame(DecodedBuffer *newFrame);
   void SetVideoFrameNext(DecodedBuffer *nextFrame);
+  int64_t CalcDiffVideoTimeAndNow(DecodedBuffer *targetFrame) const;
 
   void EnqueueAudio(DecodedBuffer *buf);
 
@@ -119,8 +122,14 @@ private:
   PixelFormat mPixelFormat;
 
   // ストリームフラグ
-  bool mSawInputEOS;
-  bool mSawOutputEOS;
+  // bool mSawInputEOS;
+  // bool mSawOutputEOS;
+
+  bool mSawVideoInputEOS, mSawAudioInputEOS;
+  bool mSawVideoOutputEOS, mSawAudioOutputEOS;
+
+  bool mLastVideoFrameEnd;
+  bool mLastAudioFrameEnd;
 
   // メディアタイマー
   MediaClock mClock;
@@ -137,12 +146,16 @@ private:
   std::mutex mAudioFrameMutex;
   size_t mAudioQueuedBytes;
   size_t mAudioDataPos;
+  int32_t mAudioLastBufIndex;
   int32_t mAudioUnitSize;
+  int64_t mAudioOutputFrames;
+  uint64_t mAudioCodecDelayUs;
   struct
   {
-    uint64_t base;   // 現在のフレーム先頭のPTS
-    uint64_t offset; // 現在の詳細な時間はstartPts + offsetTimeになる
-    void Reset() { base = INT64_MAX, offset = 0; }
+    uint64_t base;         // 現在のフレーム先頭のPTS
+    uint64_t outputFrames; // 現在のPTSを持つデータから何個出力したか
+                           // (同PTSが複数パケットにわたるケースがあるのでその対応用)
+    void Reset() { base = INT64_MAX, outputFrames = 0; }
   } mAudioTime;
   std::queue<DecodedBuffer *> mAudioFrameQueue;
 

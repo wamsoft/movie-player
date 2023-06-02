@@ -172,6 +172,7 @@ WebmExtractor::GetTrackInfo(int32_t trackIndex, TrackInfo *info)
     info->a.channels   = aparams.channels;
     info->a.bitDepth   = aparams.depth;
     info->a.sampleRate = aparams.rate;
+    info->a.codecDelay = aparams.codec_delay;
   }
 
   return true;
@@ -336,7 +337,7 @@ WebmExtractor::ReadSampleData(FramePacket *packet)
   }
 
 #if defined(DEBUG_INFO_PACKET)
-  packet->PrintInfo(mBlockFrameIndex);
+  packet->PrintInfo(mFrameIndex);
 #endif
 
   return true;
@@ -370,7 +371,9 @@ WebmExtractor::Advance()
 
     ret = nestegg_read_packet(mCtx, &mPkt);
     if (ret == 0) {
+#if defined(DEBUG_INFO_NESTEGG)
       LOGV("End of Stream\n");
+#endif
       mIsReachedEOS = true;
       break;
     }
