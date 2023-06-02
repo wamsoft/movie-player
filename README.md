@@ -1,44 +1,61 @@
 # About
 
-webm 動画再生ライブラリ作成用の作業レポジトリです。
+WebM 動画再生ライブラリ作成用の作業レポジトリです。
 
-webm と言っていますが内部使用する API/ライブラリの関係上、
-各種動画フォーマットに対応しますが、Windows 版については webm 専用となります。
-
-基本的にオーディオの対応は入っていません。
+Android は MediaExtractor/MediaCodec を使用するため、
+WebM 以外の各種動画フォーマットにも対応します。
 
 # 状況
 
 細かい事項については各アーキテクチャごとに後ろの方に別項があるので参照してください。
 
+現状のコードは音声対応に際して Windows 版のみ対応作業が完了しており、
+Android 版については broken な状態です。
+
 - Android
   - NDK の MediaExtractor+MediaCodec で対応
   - ビデオのみ動作。オーディオ非対応
-  - カラー変換を毎 RenderFrame()ごとに行っていて少し非効率
-  - **なんかスレッド周りでケアしなきゃいけない問題があったはずだが失念…**
+  - **音声対応作業に際して、一旦対応を放置しているためビルドできない状態**
 - Windows
   - nestegg + libvpx で cpu でのデコードで対応
-  - ビデオのみ動作。オーディオ非対応
-  - CPU ベース処理で generic な作りなので、別アーキテクチャでも動作する
+  - miniaudio を内蔵して音声対応
+  - CPU ベース処理で generic な作りなので、別アーキテクチャでも動作可能
     - `windows/` ディレクトリでやってるので、本格的に linux とか MacOS への対応する場合はディレクトリ名をなんか考えたい
 - Linux
   - Windows コードでそのまま動作
   - GUI の確認環境が現状手元にないので、movie_player_sample の動作は未確認
-  - movie_exporter が動作することは確認
+  - **音声対応後のビルドは未確認なので broken かも**
 
-## 音声対応状況
+## 把握している問題
 
-Windows 版ビルドでのみ、miniaudio で対応中。
+- Windows
+  - pause/resume したときに、復帰後の数フレームがフレームスキップ扱いになる
+- Android
+  - 音声対応版で行った変更に未対応なためビルドできない状態
+- Linux
+  - 音声対応版でビルド確認ができていない
 
-とりあえず音声が出るというレベルにはなっているが、
-A/V 同期やデコードドロップフレームの発生などの問題がある。
+## 最近の大きな変更
 
-ドロップについては、おそらくデコード済みバッファのハンドリングを V と A を
-同じスレッドで行っているにも関わらず、V のタイミング取りのために sleep を
-おこなっているせいで A のデコード結果のハンドリングが間に合わなくなってる。
+- `IMoviePlayer::RenderFrame()` を廃止して `IMoviePlayer::GetVideoFrame()` に
+  変更になっています。
+- `IMoviePlayer::GetVideoFrame()` は旧来の `RenderFrame()` 風に、用意したバッファへ
+  詰めて返す形式のものと、`VideoFrame*`の形でデコーダ出力の内部バッファを
+  返す形式のものの 2 通り用意してあります。
+  - 前者は `InitParam::videoColorFormat` に RGB 系フォーマットを指定した場合のみ
+    有効です。
+  - 後者は逆に、`COLOR_NOCONV` 場合に有効です。デコーダの YUV 出力を
+    そのまま取得するので、これをシェーダで直接 YUV テクスチャとして
+    描画することにより YUV>RGB 変換の CPU 負荷を回避することが可能です。
+- Video/Audio の情報取得が個別メソッドから `IMoviePlayer::GetVideoFormat()`、
+  `IMoviePlayer::GetAudioFormat()` に集約されています。
 
-また、Android 版での対応と合わせて、できれば大枠の構造(Decoder/TrackPlayer/MoviePlayerCore)を
-一本化したい。
+## 音声対応
+
+Windows 版ビルドでのみ、miniaudio で対応済みです。
+
+一応アプリ側にオーディオエンジンを持つ形にも対応できるようにはしてありますが
+テストコードを用意できていないので実際の動作については未確認です。
 
 # ディレクトリ構造
 
@@ -61,42 +78,14 @@ A/V 同期やデコードドロップフレームの発生などの問題があ�
 これを継承して各アーキテクチャ用の `MoviePlayer.h`に
 実装クラスの定義を配置してあります。
 
-※利用側からは
-
-`IMoviePlayer::CreateMovePlayer(const char *filename)`
-
-を利用します。
-
-※現時点ではアーカイブ中のファイルの再生は未対応です。
-
 ### 利用方法
 
-```
-MoviePlayer *p = MoviePlayer();
-p->Open(fd | path | byte array);  // バイト列は基本的に未サポートの方向
+`IMoviePlayer::CreateMovePlayer(const char *filename, InitParam &param)`
 
-// Open()後Play()前に変換カラーフォーマットを指定
-// アーキテクチャによるが、基本的には性能的に有利
-//   ゲームループに対してビデオのfpsは半分以下な事が多いので
-//   同一フレームが複数回よばれるため固定カラーで事前に
-//   YUV>RGB変換しておくと有利なのと、色変換をデコーダスレッド側で
-//   行えるようになるのでゲームメインループ側のCPU時間を消費しない
-p->SetColorFormat(IMoviePlayer::RGBA);
+で、`IMoviePlayer`のインスタンスを作成して使用します。
+`param.videoColorFormat` に出力したいカラーフォーマットを指定してください。
 
-p->Play(loop);
-while(p->IsPlaying()) {
-  p->RenderFrame(dst, w, h, strideBytes);
-}
-
-delete p;
-```
-
-`Open(byte array)` はとりあえず I/F を用意したものの基本的には未サポートです
-(**あとで消す予定です**)。
-また fd は Android が単純なパス指定によるファイルの取り回しが基本的に
-できない関係上用意したものなので、事実上 Android 専用の I/F となります。
-(ツールキット側で独自の名前参照系を用意しているなら、 `MoviePlayer` 側で
-`Open(path = 独自の内部パス名)` で受けるようにするのもアリかもです。
+※現時点ではアーカイブ中のファイルの再生は未対応です。
 
 ## Windows 対応について
 
@@ -131,6 +120,7 @@ vcpkg + cmake の環境を想定しています。
     - SPACE: ポーズトグル
     - ENTER: 先頭へ巻き戻し
     - ESCAPE: 再生停止してそのままテストプログラムが終了
+    - マウスホイール上下: 音声ボリューム上下
 - `tests/windows/movie_exporter.cpp`
   - 動画を一定間隔(1 秒)ごとに BMP 出力するテスト
 
@@ -138,17 +128,15 @@ vcpkg + cmake の環境を想定しています。
 
 ### 採用ライブラリ等
 
-- libvpx / vcpkg
+- libvpx / vcpkg / Windows 版のみ
+- libogg / vcpkg / Windows 版のみ
+- libvorbis / vcpkg / Windows 版のみ
+- libopus / vcpkg / Windows 版のみ
 - libyuv / 自前(`extlibs/`のもの)
-- nestegg / 自前(`extlibs/`のもの)
+- nestegg / 自前(`extlibs/`のもの) / Windows 版のみ
+- miniaudio / 自前(`extlibs/`のもの)
 
-以下は将来的に参照する可能性のあるライブラリ群。
-
-- libogg / audio 対応する場合
-- libvorbis / audio 対応する場合
-- libopus / audio 対応する場合
-
-これらは libyuv 以外は自前では抱えず、vcpkg で揃える前提で作業しています。
+なるべく vcpkg で揃える方針で作業しています。
 libyuv については、他アーキテクチャの対応もありどのみち自前で抱えているので、
 それらに揃えるということで Win でも自前で抱えたものを参照するようにしてあります。
 
@@ -191,11 +179,14 @@ VS のコマンドプロンプト(いわゆる DOS 窓)から作業を行う場�
 現在 git ツリーに配置してあるバイナリは VS2019 の Clang(12.0.0)
 で作成したものとなります。
 
-### Linux(Ununtu)でのビルドについて
+## Linux(Ununtu)対応について
+
+**注意：現状ビルド未確認な状態です**
 
 Windows 版は、実態としては Windows に依存するコードは含まないか
 あるいは部分的に ifdef で対応しているため、vcpkg の対応している環境上では
 そのままビルドできる状態になっています。
+これにより Linux でのビルドについても一応対応してあります。
 
 ※GUI 環境が手元にないので movie_player_sample では確認できていませんが
 movie_exporter は動作して、画像出力ができています。
@@ -226,6 +217,8 @@ movie_exporter は動作して、画像出力ができています。
 
 ## Android 対応について
 
+**注意：現状ビルド不可能な状態です**
+
 NDK の MediaExtractor + MediaCodec を使用してフル C++で組んであります。
 
 デコーダは内部で std::thread を使用してスレッド化してあります。
@@ -233,12 +226,11 @@ MoviewPlayer のインスタンスごとにスレッドが生まれる感じに�
 
 ### 要求 API バージョン
 
-基本機能として API 21 (Lollipop / Android 5.0) 以上を要求しますが、
-さすがにもうそこは問題ないはず？(Android の Google Play などでの
-最低要求が今どうなってるかよく知らないのでどこが最低ラインかよく分かっていない)
+基本機能として API 21 (Lollipop / Android 5.0) 以上を要求します。
 
-テストプログラムでは、バイナリ列入力で API28 を要求する関係上 `test/android/app/build.gradle` の
-minSdk は 28 になっていますが、現状ではバイナリ列入力は動作しないため(詳細は後の記述参考)
+テストプログラムでは、バイナリ列入力で API28 を要求する関係上
+`test/android/app/build.gradle` の minSdk は 28 になっていますが、
+現状ではバイナリ列入力は動作しないため(詳細は後の記述参考)
 実際の利用ケースでは 21 で問題ないはずです。
 
 ### ライブラリのビルド方法
