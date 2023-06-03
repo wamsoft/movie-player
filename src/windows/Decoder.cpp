@@ -127,7 +127,7 @@ Decoder::CommonDecodeArgCheck(DecodedBuffer *dcBuf, FramePacket *packet)
     return false;
   }
 
-  if (packet->Type() != Type()) {
+  if (packet->Type() != (TrackType)Type()) {
     LOGE("invalid frame packet type: %d (must be %d)\n", packet->Type(), Type());
     return false;
   }
@@ -137,7 +137,7 @@ Decoder::CommonDecodeArgCheck(DecodedBuffer *dcBuf, FramePacket *packet)
     return false;
   }
 
-  if (dcBuf->Type() != Type()) {
+  if (dcBuf->Type() != (TrackType)Type()) {
     LOGE("invalid decoder buffer type: %d (must be %d)\n", dcBuf->Type(), Type());
     return false;
   }

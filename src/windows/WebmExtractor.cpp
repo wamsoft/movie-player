@@ -3,8 +3,6 @@
 #include "WebmExtractor.h"
 #include "Decoder.h"
 
-#include <libwebm/mkvparser.hpp>
-
 #include <vector>
 #include <algorithm>
 #include <stdarg.h>
@@ -214,7 +212,7 @@ WebmExtractor::SeekTo(long long positionUs)
     return false;
   }
 
-  int64_t posNs = us_to_ns(positionUs);
+  int64_t posNs = us_to_ns((int64_t)positionUs);
   if (!nestegg_has_cues(mCtx)) {
     posNs = 0;
   }

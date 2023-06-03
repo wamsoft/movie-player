@@ -1,6 +1,10 @@
 # MSVC_RUNTIME_LIBRARY のサポートが 3.15 から
 cmake_minimum_required(VERSION 3.15.0)
 
+if(UNIX AND NOT APPLE)
+  set(LINUX TRUE)
+endif()
+
 # vcpkg対応
 if(DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
@@ -10,7 +14,7 @@ endif()
 # ------------------------------------------------------------------------------
 # movie_player_test
 # ------------------------------------------------------------------------------
-if(WIN32)
+if(WIN32 OR LINUX)
 
 set(MOVIE_PLAYER_TEST movie_player_test)
 project(${MOVIE_PLAYER_TEST} VERSION 0.1.0)

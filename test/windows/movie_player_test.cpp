@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <thread>
 #include <chrono>
@@ -107,6 +108,7 @@ main(int argc, char *argv[])
     printf("Failed to create MoviePlayer! \n");
     goto finish;
   }
+  
   // GLFWウィンドウにプレイヤーを紐付ける(イベントハンドラ用)
   glfwSetWindowUserPointer(glfwWin, player);
 

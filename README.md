@@ -24,7 +24,7 @@ Android 版については broken な状態です。
 - Linux
   - Windows コードでそのまま動作
   - GUI の確認環境が現状手元にないので、movie_player_sample の動作は未確認
-  - **音声対応後のビルドは未確認なので broken かも**
+  - **ビルド完走まで確認したが、WSL上のテストでは描画が行われない**
 
 ## 把握している問題
 
@@ -33,7 +33,8 @@ Android 版については broken な状態です。
 - Android
   - 音声対応版で行った変更に未対応なためビルドできない状態
 - Linux
-  - 音声対応版でビルド確認ができていない
+  - ビルド完走まで確認したが、WSL上のテストでは描画が正しく行われない
+    - WSL環境の問題なのかプログラムの問題なのかは切り分けられていない
 
 ## 最近の大きな変更
 
@@ -181,21 +182,20 @@ VS のコマンドプロンプト(いわゆる DOS 窓)から作業を行う場�
 
 ## Linux(Ununtu)対応について
 
-**注意：現状ビルド未確認な状態です**
-
 Windows 版は、実態としては Windows に依存するコードは含まないか
 あるいは部分的に ifdef で対応しているため、vcpkg の対応している環境上では
 そのままビルドできる状態になっています。
 これにより Linux でのビルドについても一応対応してあります。
 
-※GUI 環境が手元にないので movie_player_sample では確認できていませんが
-movie_exporter は動作して、画像出力ができています。
+※WSL2(WSLg)環境でmovie_player_testが動作することまでは確認していますが、
+描画が正しく行われていないのと、手元のWSLg環境で音声出力できない状態のため
+動作確認までは行えていない状態です。
 
 ※ソース類のディレクトリ名が`windows/`のまま参照しています。
 将来的には `generic/` とか `common/` とかあるいは `src/` 直下に展開とか
 なんかそういう感じに移動したいですが、暫定的にそのままのディレクトリ名です。
 
-以下、WSL2 の Ubuntu20.04 でライブラリ部をビルド確認した際の
+以下、WSL2 の Ubuntu22.04 でライブラリ部をビルド確認した際の
 ステップバイステップの記録です。
 
 - vcpkg を導入する
@@ -204,7 +204,7 @@ movie_exporter は動作して、画像出力ができています。
 - `VCPKG_ROOT`設定
   - `export VCPKG_ROOT=/foo/bar/vcpkg`
 - 依存ライブラリをインストールする
-  - `./vcpkg/vcpkg install libvpx`
+  - `./vcpkg/vcpkg install libvpx libogg libvorbis opus`
   - libvpx が nasm と pkgconfig を要求するので導入
     - `sudo apt-get install nasm pkgconfig`
 - cmake が無いのでインストール
@@ -213,7 +213,19 @@ movie_exporter は動作して、画像出力ができています。
   - `mkdir ubuntu`
   - `cd ubuntu/`
   - `cmake ..`
-  - `cmake --build .`
+  - `cmake --build . -j`
+- テストプログラムのビルドはさらにOpenGL関係のパッケージを導入
+  - `./vcpkg/vcpkg install glfw3 glew`
+    - 必要なら以下のパッケージを導入
+    - glfw3が要求
+      - `sudo apt-get install libxinerama-dev libxcursor-dev xorg-dev libglu1-mesa-dev`
+    - glewが要求
+      - `sudo apt-get install libxmu-dev libxi-dev libgl-dev`
+  - `cd test/`
+  - `mkdir ubuntu`
+  - `cd ubuntu/`
+  - `cmake ../windows`
+  - `cmake --build . -j`
 
 ## Android 対応について
 

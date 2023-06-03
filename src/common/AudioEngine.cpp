@@ -220,8 +220,8 @@ AudioEngine::ReadData(void *pFramesOut, ma_uint64 frameCount, ma_uint64 *pFrames
   size_t bytesToRead   = frameCount * mFrameSize;
 
   if (mPlayer) {
-    updated =
-      mPlayer->GetAudioFrame((uint8_t *)pFramesOut, frameCount, &framesRead, nullptr);
+    updated = mPlayer->GetAudioFrame((uint8_t *)pFramesOut, frameCount,
+                                     (uint64_t *)&framesRead, nullptr);
   }
 
 #if 0
