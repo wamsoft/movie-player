@@ -398,9 +398,11 @@ MoviePlayerCore::SelectTargetTrack()
       mExtractor->SelectTrack(TRACK_TYPE_AUDIO, i);
 
       if (mAudioDecoder) {
-        LOGV(" AUDIO: codec=%s, channels=%d, sampleRate=%f, depth=%d, codecDelay: %llu\n",
-             mAudioDecoder->CodecName(), info.a.channels, info.a.sampleRate,
-             info.a.bitDepth, mAudioCodecDelayUs);
+        LOGV(
+          " AUDIO: codec=%s, channels=%d, sampleRate=%f, depth=%d, codecDelay: %" PRIu64
+          "\n",
+          mAudioDecoder->CodecName(), info.a.channels, info.a.sampleRate, info.a.bitDepth,
+          mAudioCodecDelayUs);
       }
 
     } break;
@@ -561,14 +563,15 @@ MoviePlayerCore::HandleVideoOutput()
         int64_t timeDiff        = CalcDiffVideoTimeAndNow(mVideoFrameNext);
         if (timeDiff >= frameSkipThresh) {
           // フレームスキップ
-          LOGV("*** video frame skipped: frame=%lld, pts=%lld, diff=%lld, thresh=%lld\n",
+          LOGV("*** video frame skipped: frame=%" PRId64 ", pts=%" PRId64
+               ", diff=%" PRId64 ", thresh=%" PRId64 "\n",
                mVideoFrameNext->frame, ns_to_us(mVideoFrameNext->timeStampNs), timeDiff,
                frameSkipThresh);
           SetVideoFrameNext(nullptr);
           isFrameSkipping = true;
         } else if (timeDiff >= 0) {
           // 出力ビデオフレーム更新
-          // LOGV("video update: pts=%lld, diff=%lld\n",
+          // LOGV("video update: pts=%" PRId64 ", diff=%" PRId64 "\n",
           //      ns_to_us(mVideoFrameNext->timeStampNs), timeDiff);
           UpdateVideoFrameToNext();
           isFrameReady = true;
@@ -785,7 +788,7 @@ MoviePlayerCore::SetVideoFrame(DecodedBuffer *newFrame)
     DecodedBuffer *prevFrame = mVideoFrame;
     mVideoFrame              = newFrame;
 
-    // LOGV("new video frame: pts=%lld us\n", ns_to_us(mVideoFrame->timeStampNs));
+    // LOGV("new video frame: pts=%" PRId64 " us\n", ns_to_us(mVideoFrame->timeStampNs));
 
     // 前フレームがダミーフレームでなければ開放
     if (prevFrame && prevFrame != &mDummyFrame) {
@@ -987,8 +990,8 @@ MoviePlayerCore::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *fr
     mAudioTime.outputFrames = nextOutputFrames;
 
 #if 0 // DEBUG
-    LOGV("time=%lld, base=%lld, offset=%lld\n", mediaTimeUs, ns_to_us(timeBase),
-         timeOffset);
+    LOGV("time=%" PRId64 ", base=%" PRId64 ", offset=%" PRId64 "\n", mediaTimeUs,
+         ns_to_us(timeBase), timeOffset);
 #endif
   } else {
     // 音声トラックがない

@@ -70,14 +70,15 @@ MediaClock::SetPresentationTime(int64_t ptsUs)
   std::lock_guard<std::mutex> lock(mLock);
 
   if (ptsUs >= mDurationUs) {
-    // LOGV("presentation time exceeds the duration: %lld / %lld\n", ptsUs, mDurationUs);
+    // LOGV("presentation time exceeds the duration: %" PRId64 " / %" PRId64 "\n", ptsUs,
+    // mDurationUs);
     ptsUs = mDurationUs;
   }
 
   mPresentationTimeUs = ptsUs;
 
 #if defined(DEBUG_INFO_MEDIACLOCK)
-  LOGV("set pts:%lld\n", mPresentationTimeUs);
+  LOGV("set pts:%" PRId64 "\n", mPresentationTimeUs);
 #endif
 }
 
@@ -150,8 +151,8 @@ MediaClock::UpdateAnchorTime(int64_t mediaUs, int64_t realUs, int64_t maxMediaUs
   mMaxMediaTimeUs    = maxMediaUs;
 
 #if defined(DEBUG_INFO_MEDIACLOCK)
-  LOGV("anchor_m:%lld, anchor_r:%lld, max_m:%lld\n", mAnchorMediaTimeUs,
-       mAnchorRealTimeUs, mMaxMediaTimeUs);
+  LOGV("anchor_m:%" PRId64 ", anchor_r:%" PRId64 ", max_m:%" PRId64 "\n",
+       mAnchorMediaTimeUs, mAnchorRealTimeUs, mMaxMediaTimeUs);
 #endif
 
   return true;

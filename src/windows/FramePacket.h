@@ -58,8 +58,8 @@ struct FramePacket : public BufferQueueEntryBase
       const char *typeStr =
         (type == TRACK_TYPE_VIDEO ? "VIDEO"
                                   : (type == TRACK_TYPE_AUDIO ? "AUDIO" : "UNKNOWN"));
-      INLINE_LOGV("FramePacket: type=%s, size=%6zu, track=%2d, time=%12llu %s\n", typeStr,
-                  dataSize, trackNum, timeStampNs, isKeyFrame ? "<KEY>" : "");
+      INLINE_LOGV("FramePacket: type=%s, size=%6zu, track=%2d, time=%12" PRIu64 " %s\n",
+                  typeStr, dataSize, trackNum, timeStampNs, isKeyFrame ? "<KEY>" : "");
     }
 #endif
   }

@@ -13,8 +13,9 @@
 // vBuf の内容は無視されます。
 bool
 convert_yuv_to_rgb32(uint8_t *dst, int32_t dstStride, PixelFormat dstFormat,
-                     const uint8_t *yBuf, const uint8_t *uBuf, const uint8_t *vBuf, const uint8_t *aBuf,
-                     int32_t yStride, int32_t uvStride, int32_t aStride, int32_t width, int32_t height,
+                     const uint8_t *yBuf, const uint8_t *uBuf, const uint8_t *vBuf,
+                     const uint8_t *aBuf, int32_t yStride, int32_t uvStride,
+                     int32_t aStride, int32_t width, int32_t height,
                      PixelFormat srcFormat, ColorSpace colorSpace, ColorRange colorRange)
 {
   if (dst == nullptr) {
@@ -56,12 +57,13 @@ convert_yuv_to_rgb32(uint8_t *dst, int32_t dstStride, PixelFormat dstFormat,
     break;
   }
 
-  using YuvAlphaConvFunc  = decltype(libyuv::I420AlphaToARGBMatrix);
-  using YuvConvFunc       = decltype(libyuv::I420ToARGBMatrix);
-  using NvConvFunc        = decltype(libyuv::NV12ToARGBMatrix);
+  using YuvAlphaConvFunc = decltype(libyuv::I420AlphaToARGBMatrix);
+  using YuvConvFunc      = decltype(libyuv::I420ToARGBMatrix);
+  using NvConvFunc       = decltype(libyuv::NV12ToARGBMatrix);
+
   YuvAlphaConvFunc *yuvAlphaConvert = nullptr;
-  YuvConvFunc *yuvConvert = nullptr;
-  NvConvFunc *nvConvert   = nullptr;
+  YuvConvFunc *yuvConvert           = nullptr;
+  NvConvFunc *nvConvert             = nullptr;
 
   switch (srcFormat) {
   case PIXEL_FORMAT_I420:
@@ -189,8 +191,8 @@ convert_yuv_to_rgb32(uint8_t *dst, int32_t dstStride, PixelFormat dstFormat,
     nvConvert(yBuf, yStride, uBuf, uvStride, dst, dstStride, yuvConstants, width, height);
 
   } else if (yuvAlphaConvert) {
-    yuvAlphaConvert(yBuf, yStride, uBuf, uvStride, vBuf, uvStride, aBuf, aStride, dst, dstStride,
-                 yuvConstants, width, height, 0);
+    yuvAlphaConvert(yBuf, yStride, uBuf, uvStride, vBuf, uvStride, aBuf, aStride, dst,
+                    dstStride, yuvConstants, width, height, 0);
 
   } else {
     yuvConvert(yBuf, yStride, uBuf, uvStride, vBuf, uvStride, dst, dstStride,
@@ -200,7 +202,7 @@ convert_yuv_to_rgb32(uint8_t *dst, int32_t dstStride, PixelFormat dstFormat,
 #if defined(DEBUG_PERF_PIXELCONV)
   high_resolution_clock::time_point end = high_resolution_clock::now();
   microseconds elapsed                  = duration_cast<microseconds>(end - begin);
-  LOGV("PERF: yuv conv: %lld[us]\n", elapsed.count());
+  LOGV("PERF: yuv conv: %" PRId64 "[us]\n", elapsed.count());
 #endif
 
   return true;
@@ -238,7 +240,8 @@ convert_yuv_to_rgb32(uint8_t *dst, int32_t dstStride, PixelFormat dstFormat,
   int32_t vStride     = dcBuf->v.stride[VDB_PLANE_V];
   int32_t aStride     = dcBuf->v.stride[VDB_PLANE_A];
   return convert_yuv_to_rgb32(dst, dstStride, dstFormat, yBuf, uBuf, vBuf, aBuf, yStride,
-                              uStride, aStride, dcBuf->v.displayWidth, dcBuf->v.displayHeight,
-                              dcBuf->v.format, dcBuf->v.colorSpace, dcBuf->v.colorRange);
+                              uStride, aStride, dcBuf->v.displayWidth,
+                              dcBuf->v.displayHeight, dcBuf->v.format,
+                              dcBuf->v.colorSpace, dcBuf->v.colorRange);
 }
 #endif

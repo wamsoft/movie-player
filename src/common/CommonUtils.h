@@ -119,7 +119,8 @@ public:
     if (isActive) {
       high_resolution_clock::time_point end = high_resolution_clock::now();
       microseconds elapsed                  = duration_cast<microseconds>(end - begin);
-      LOGV("PERF: %s: %lld[us]\n", label.c_str(), elapsed.count());
+      LOGV("PERF: %s: %" PRId64 "[us]\n", label.c_str(), elapsed.count());
+
       isActive = false;
     }
   }
@@ -256,7 +257,8 @@ public:
     while (mQueue.empty()) {
       std::cv_status result = mCond.wait_for(lock, timeout);
       if (result == std::cv_status::timeout) {
-        INLINE_LOGE("SafeQueue: dequeue time out: timeout=%lld\n", timeout.count());
+        INLINE_LOGE("SafeQueue: dequeue time out: timeout=%" PRId64 "\n",
+                    timeout.count());
         return false;
       }
     }
@@ -386,9 +388,9 @@ public:
 
     std::unique_lock<std::mutex> lock(mMutex);
 
-#if 0 // DEBUG
-    INLINE_LOGV("wait event: %x, timeout = %lldus, current mEvent: %x", event, timeoutUs,
-                mEvent);
+#if defined(DEBUG_INFO_EVENTFLAG)
+    INLINE_LOGV("wait event: %x, timeout = %" PRId64 "us, current mEvent: %x", event,
+                timeoutUs, mEvent);
 #endif
 
     bool noTimeout = true;
@@ -413,7 +415,7 @@ public:
 
     std::lock_guard<std::mutex> lock(mMutex);
 
-#if 0 // DEBUG
+#if defined(DEBUG_INFO_EVENTFLAG)
     INLINE_LOGV("set event: %x", event);
 #endif
 
@@ -421,7 +423,13 @@ public:
     mCond.notify_all();
   }
 
-  void Clear(int32_t event) { mEvent &= ~event; }
+  void Clear(int32_t event)
+  {
+#if defined(DEBUG_INFO_EVENTFLAG)
+    INLINE_LOGV("clear event: %x", event);
+#endif
+    mEvent &= ~event;
+  }
 
   void ClearAll() { Clear(0xffffffff); }
 

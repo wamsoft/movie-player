@@ -46,7 +46,7 @@ endif()
 # movie_exporter
 # ------------------------------------------------------------------------------
 # 必要なときだけONにしてビルドする
-if(OFF)
+if(ON)
 set(MOVIE_EXPORTER movie_exporter)
 project(${MOVIE_EXPORTER} VERSION 0.1.0)
 add_executable(${MOVIE_EXPORTER} movie_exporter.cpp)

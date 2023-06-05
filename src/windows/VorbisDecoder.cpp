@@ -167,7 +167,6 @@ VorbisDecoder::DecodeFrame(DecodedBuffer *dcBuf, FramePacket *packet)
     dcBuf->Resize(dataSize);
     dcBuf->dataSize = dataSize;
     memcpy(dcBuf->data, mDecodeBuf.data(), dataSize);
-    // LOGV("decode audio: size=%llu, ts=%llu\n", dataSize, dcBuf->timeStampNs);
   } else {
     size_t dataSize = 0;
     dcBuf->Resize(dataSize);

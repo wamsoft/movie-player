@@ -6,15 +6,8 @@
 // インライン実装でログしたい場合はInlineLog.hを使用してください。
 
 #if !defined(MOVIE_DEBUG)
-#if defined(__ANDROID__)
-#if !defined(NDEBUG)
+#if !defined(NDEBUG) || defined(_DEBUG) || defined(DEBUG)
 #define MOVIE_DEBUG
-#endif
-#else
-// !ANDROID
-#if defined(_DEBUG) || defined(DEBUG)
-#define MOVIE_DEBUG
-#endif
 #endif
 #endif
 
@@ -50,13 +43,14 @@
     abort();             \
   }
 // nestegg版用の各種デバッグフラグ
+// #define DEBUG_INFO_EVENTFLAG   // EventFlagトレース
 // #define DEBUG_INFO_NESTEGG     // nesteggロガー
 // #define DEBUG_PERF_DECODER     // デコーダ性能チェック
 // #define DEBUG_PERF_PIXELCONV   // ピクセル変換性能チェック
 // #define DEBUG_INFO_PACKET      // 入力パケット情報
 // #define DEBUG_INFO_DECODER     // デコーダ情報
 // #define DEBUG_INFO_CUES        // キュー(キーフレーム)情報
-// #define DEBUG_INFO_MEDIACLOCK // MEdiaClock情報
+// #define DEBUG_INFO_MEDIACLOCK  // MEdiaClock情報
 #endif
 
 #else

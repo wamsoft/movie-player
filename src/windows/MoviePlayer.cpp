@@ -163,7 +163,7 @@ MoviePlayer::Resume()
 void
 MoviePlayer::Seek(int64_t posUs)
 {
-  LOGV("MoviePlayer: seek posUs=%lld\n", posUs);
+  LOGV("MoviePlayer: seek posUs=%" PRId64 "\n", posUs);
 
   if (mPlayer) {
     return mPlayer->Seek(posUs);
@@ -326,7 +326,8 @@ MoviePlayer::GetVideoFrameCommon(const DecodedBuffer **dcBuf)
     }
 
     // DEBUG
-    // LOGV("decoded buffer frame: %lld size:%zu\n", dcBuf->frame, dcBuf->dataSize);
+    // LOGV("decoded buffer frame: %" PRId64 " size:%zu\n", dcBuf->frame,
+    // dcBuf->dataSize);
   }
 
   return updated;

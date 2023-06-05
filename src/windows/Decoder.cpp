@@ -156,7 +156,7 @@ Decoder::CommonDecodeArgCheck(DecodedBuffer *dcBuf, FramePacket *packet)
 void
 Decoder::CommonDebugFrameInfo(FramePacket *packet)
 {
-  LOGV("DecodeFrame[%s]: size=%6zu, time=%12llu\n", CodecName(), packet->dataSize,
+  LOGV("DecodeFrame[%s]: size=%6zu, time=%12" PRIu64 "\n", CodecName(), packet->dataSize,
        packet->timeStampNs);
 }
 

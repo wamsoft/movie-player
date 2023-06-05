@@ -108,7 +108,7 @@ main(int argc, char *argv[])
     printf("Failed to create MoviePlayer! \n");
     goto finish;
   }
-  
+
   // GLFWウィンドウにプレイヤーを紐付ける(イベントハンドラ用)
   glfwSetWindowUserPointer(glfwWin, player);
 
@@ -170,7 +170,7 @@ main(int argc, char *argv[])
       glfwSwapBuffers(glfwWin);
       glfwPollEvents();
       frameCount++;
-      // printf(" Time = %lld / %lld usec \n", player->Position(), total);
+      // printf(" Time = %" PRId64 " / %" PRId64 " usec \n", player->Position(), total);
     }
 
     delete[] pixels;

@@ -25,8 +25,10 @@ main(int argc, char *argv[])
   std::string outBaseName = p.stem().string() + "_";
 
   // MoviePlayer を作成
-  IMoviePlayer *player =
-    IMoviePlayer::CreateMoviePlayer(testFilePath.c_str(), IMoviePlayer::COLOR_RGBA);
+  IMoviePlayer::InitParam param;
+  param.Init();
+  param.videoColorFormat = IMoviePlayer::COLOR_RGBA;
+  IMoviePlayer *player   = IMoviePlayer::CreateMoviePlayer(testFilePath.c_str(), param);
   if (player == nullptr) {
     printf("Failed to create MoviePlayer! \n");
     goto finish;
@@ -39,8 +41,11 @@ main(int argc, char *argv[])
     // なる場合はしかるべく対処すること。
 
     // 情報取得
-    int32_t w      = player->Width();
-    int32_t h      = player->Height();
+    IMoviePlayer::VideoFormat vf;
+    player->GetVideoFormat(&vf);
+    int32_t w      = vf.width;
+    int32_t h      = vf.height;
+    float fps      = vf.frameRate;
     uint64_t total = player->Duration();
     printf("MOVIE: Width = %d Height = %d / Duration = %" PRId64 " us\n", w, h, total);
 
@@ -57,7 +62,7 @@ main(int argc, char *argv[])
     // 再生終了か画面タッチで終了
     int frameCount = 0;
     while (player->IsPlaying()) {
-      player->RenderFrame(pixels, w, h, w * 4);
+      player->GetVideoFrame(pixels, w, h, w * 4);
 
       // bmp出力(pngだと1fpsでもおっつかない
       // あと、テスト用なのでとにかく画像が出れば何でもいいので)

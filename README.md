@@ -24,7 +24,8 @@ Android 版については broken な状態です。
 - Linux
   - Windows コードでそのまま動作
   - GUI の確認環境が現状手元にないので、movie_player_sample の動作は未確認
-  - **ビルド完走まで確認したが、WSL上のテストでは描画が行われない**
+  - **ビルド完走＋ movie_exporter で画像が出ることを確認**
+    - WSL 上で movie_player だと画面描画が更新されないが確認した WSL 環境での OpenGL の問題かも
 
 ## 把握している問題
 
@@ -33,8 +34,7 @@ Android 版については broken な状態です。
 - Android
   - 音声対応版で行った変更に未対応なためビルドできない状態
 - Linux
-  - ビルド完走まで確認したが、WSL上のテストでは描画が正しく行われない
-    - WSL環境の問題なのかプログラムの問題なのかは切り分けられていない
+  - 確認した WSL 環境では movie_player_test での描画が正しく行われない
 
 ## 最近の大きな変更
 
@@ -187,8 +187,8 @@ Windows 版は、実態としては Windows に依存するコードは含まな
 そのままビルドできる状態になっています。
 これにより Linux でのビルドについても一応対応してあります。
 
-※WSL2(WSLg)環境でmovie_player_testが動作することまでは確認していますが、
-描画が正しく行われていないのと、手元のWSLg環境で音声出力できない状態のため
+※WSL2(WSLg)環境で movie_player_test が動作することまでは確認していますが、
+描画が正しく行われていないのと、手元の WSLg 環境で音声出力できない状態のため
 動作確認までは行えていない状態です。
 
 ※ソース類のディレクトリ名が`windows/`のまま参照しています。
@@ -214,12 +214,12 @@ Windows 版は、実態としては Windows に依存するコードは含まな
   - `cd ubuntu/`
   - `cmake ..`
   - `cmake --build . -j`
-- テストプログラムのビルドはさらにOpenGL関係のパッケージを導入
+- テストプログラムのビルドはさらに OpenGL 関係のパッケージを導入
   - `./vcpkg/vcpkg install glfw3 glew`
     - 必要なら以下のパッケージを導入
-    - glfw3が要求
+    - glfw3 が要求
       - `sudo apt-get install libxinerama-dev libxcursor-dev xorg-dev libglu1-mesa-dev`
-    - glewが要求
+    - glew が要求
       - `sudo apt-get install libxmu-dev libxi-dev libgl-dev`
   - `cd test/`
   - `mkdir ubuntu`
