@@ -175,6 +175,10 @@ AudioEngine::Done()
 void
 AudioEngine::Start()
 {
+  // MEMO
+  // 多重startはma_sound_start()内部でケアされている
+  // engine的にチェックが必要な場合は、自前でフラグを管理するか
+  // ma_sound_is_playing()を使って内部状態を確認するかで対応可能。
   ma_result result = ma_sound_start(&mSound);
   if (result != MA_SUCCESS) {
     LOGE("failed to start sound: err=%d\n", result);

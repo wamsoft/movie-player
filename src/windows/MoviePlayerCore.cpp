@@ -43,13 +43,13 @@ MoviePlayerCore::Init()
   mVideoFrameLastGet            = nullptr;
   mDummyFrame.InitByType(TRACK_TYPE_VIDEO, -1);
 
-  mAudioEngine       = nullptr;
-  mAudioQueuedBytes  = 0;
-  mAudioDataPos      = 0;
-  mAudioLastBufIndex = -1;
-  mAudioUnitSize     = 0;
-  mAudioOutputFrames = 0;
-  mAudioCodecDelayUs = 0;
+  mAudioEngine            = nullptr;
+  mAudioQueuedBytes       = 0;
+  mAudioDataPos           = 0;
+  mAudioUnitSize          = 0;
+  mAudioOutputFrames      = 0;
+  mAudioCodecDelayUs      = 0;
+  mAudioResumeMediaTimeUs = 0;
   mAudioTime.Reset();
 }
 
@@ -398,11 +398,10 @@ MoviePlayerCore::SelectTargetTrack()
       mExtractor->SelectTrack(TRACK_TYPE_AUDIO, i);
 
       if (mAudioDecoder) {
-        LOGV(
-          " AUDIO: codec=%s, channels=%d, sampleRate=%f, depth=%d, codecDelay: %" PRIu64
-          "\n",
-          mAudioDecoder->CodecName(), info.a.channels, info.a.sampleRate, info.a.bitDepth,
-          mAudioCodecDelayUs);
+        LOGV(" AUDIO: codec=%s, channels=%d, sampleRate=%f, depth=%d, codecDelay=%" PRIu64
+             "\n",
+             mAudioDecoder->CodecName(), info.a.channels, info.a.sampleRate,
+             info.a.bitDepth, mAudioCodecDelayUs);
       }
 
     } break;
@@ -674,7 +673,7 @@ MoviePlayerCore::HandleMessage(int32_t what, int64_t arg, void *data)
     break;
 
   case MSG_PAUSE:
-    if (GetState() == STATE_PLAY) {
+    if (IsCurrentState(STATE_PLAY)) {
       // 発行済のメッセージを全フラッシュ
       // その後MSG_DECODEを発行しないので、そのままデコード処理はポーズする
       SetState(STATE_PAUSE);
@@ -683,7 +682,28 @@ MoviePlayerCore::HandleMessage(int32_t what, int64_t arg, void *data)
     break;
 
   case MSG_RESUME:
-    if (GetState() == STATE_PAUSE) {
+    if (IsCurrentState(STATE_PAUSE)) {
+      mClock.ClearStartMediaTime();
+
+      if (IsAudioAvailable()) {
+        mAudioOutputFrames = 0;
+
+        // audio有効時のメディアクロック更新はGetAudioFrame()からなので
+        // 非同期アクセスが起点となり、ビデオフレームの更新確認時に初回更新が
+        // かかってない可能性がある。そのため、ここで前回の最終タイムを使用して
+        // start/anchorに更新をかけておく。
+        // 非同期アクセスの保護は audio frame用の mutex を借りる
+        std::lock_guard<std::mutex> lock(mAudioFrameMutex);
+        mClock.SetStartMediaTime(mAudioResumeMediaTimeUs);
+        mClock.SetPresentationTime(mAudioResumeMediaTimeUs);
+        mClock.UpdateAnchorTime(mAudioResumeMediaTimeUs, get_time_us(), INT64_MAX);
+      }
+
+      // レジューム直後はビデオを強制的に次フレームに更新
+      if (IsVideoAvailable() && mVideoFrameNext) {
+        UpdateVideoFrameToNext();
+      }
+
       SetState(STATE_PLAY);
       Post(MSG_DECODE);
     }
@@ -745,10 +765,10 @@ MoviePlayerCore::Flush()
       mAudioFrameQueue.pop();
       mAudioDecoder->ReleaseDecodedBufferIndex(buf->bufIndex);
     }
-    mAudioQueuedBytes  = 0;
-    mAudioDataPos      = 0;
-    mAudioOutputFrames = 0;
-    mAudioLastBufIndex = -1;
+    mAudioQueuedBytes       = 0;
+    mAudioDataPos           = 0;
+    mAudioOutputFrames      = 0;
+    mAudioResumeMediaTimeUs = 0;
     mAudioTime.Reset();
   }
 
@@ -876,15 +896,15 @@ MoviePlayerCore::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *fr
   uint64_t readFrames = 0;
   int64_t mediaTimeUs = 0;
 
-  // プリロード中と完走後にリセットされるまでの期間は出力を行わない
-  if (GetState() == STATE_PRELOADING || mLastAudioFrameEnd) {
-    readFrames  = 0;
-    hasNewFrame = false;
-    goto out;
-  }
-
   if (IsAudioAvailable()) {
     std::lock_guard<std::mutex> lock(mAudioFrameMutex);
+
+    // プリロード中と完走後にリセットされるまでの期間は出力を行わない
+    if (IsCurrentState(STATE_PRELOADING) || mLastAudioFrameEnd) {
+      readFrames  = 0;
+      hasNewFrame = false;
+      goto out;
+    }
 
     uint64_t reqBytes     = frameCount * mAudioUnitSize;
     uint8_t *dst          = frames;
@@ -945,7 +965,8 @@ MoviePlayerCore::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *fr
     mAudioQueuedBytes -= (reqBytes - bytesToRead);
     hasNewFrame = true;
 
-    // 最終かつ読み込みが0フレームだった場合
+    // 最終かつ読み込みが0フレームだった場合(ちょうどEOSバッファだけ残った場合)
+    // メディアクロック系は触らずにすぐ戻る
     if (mLastAudioFrameEnd && readFrames == 0) {
       readFrames  = 0;
       hasNewFrame = false;
@@ -978,9 +999,12 @@ MoviePlayerCore::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *fr
       int64_t nowMediaUs     = mClock.GetStartMediaTime() +
                            calc_audio_duration_us(mAudioOutputFrames, sampleRate);
       mClock.UpdateAnchorTime(nowMediaUs, nowUs, maxMediaTimeUs);
+
+      // resumu時に最速でstart/anchorを復帰するために再生終了時点のPTSを保存
+      mAudioResumeMediaTimeUs = maxMediaTimeUs;
     } else {
       // negative timeはpresentationしてはいけないとmkv仕様書に記載なので読み捨て
-      // (作り上メモリコピーしちゃってるけど、framesReadをいじって対応)
+      // (作り上すでにメモリコピーしちゃってるけど、framesReadをいじって対応)
       readFrames  = 0;
       hasNewFrame = false;
       // LOGV("* negative pts *\n");

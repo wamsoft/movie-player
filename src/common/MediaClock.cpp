@@ -97,6 +97,10 @@ MediaClock::SetStartMediaTime(int64_t mediaUs)
 
   mStartSystemTimeUs = get_time_us();
   mStartMediaTimeUs  = mediaUs;
+
+#if defined(DEBUG_INFO_MEDIACLOCK)
+  LOGV("set start media time:%" PRId64 "\n", mStartMediaTimeUs);
+#endif
 }
 
 int64_t
@@ -144,15 +148,15 @@ MediaClock::UpdateAnchorTime(int64_t mediaUs, int64_t realUs, int64_t maxMediaUs
   std::lock_guard<std::mutex> lock(mLock);
 
   int64_t nowUs      = get_time_us();
-  int64_t nowMediaUs = mediaUs + (realUs - realUs) * (double)mPlaybackRate;
+  int64_t nowMediaUs = mediaUs + (nowUs - realUs) * (double)mPlaybackRate;
 
   mAnchorMediaTimeUs = nowMediaUs;
   mAnchorRealTimeUs  = nowUs;
   mMaxMediaTimeUs    = maxMediaUs;
 
 #if defined(DEBUG_INFO_MEDIACLOCK)
-  LOGV("anchor_m:%" PRId64 ", anchor_r:%" PRId64 ", max_m:%" PRId64 "\n",
-       mAnchorMediaTimeUs, mAnchorRealTimeUs, mMaxMediaTimeUs);
+  LOGV("m:%" PRId64 ", anchor_m:%" PRId64 ", anchor_r:%" PRId64 ", max_m:%" PRId64 "\n",
+       mediaUs, mAnchorMediaTimeUs, mAnchorRealTimeUs, mMaxMediaTimeUs);
 #endif
 
   return true;

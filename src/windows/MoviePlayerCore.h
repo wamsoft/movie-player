@@ -123,35 +123,32 @@ private:
   PixelFormat mOutputPixelFormat;
   PixelFormat mPixelFormat;
 
-  // ストリームフラグ
-  // bool mSawInputEOS;
-  // bool mSawOutputEOS;
-
+  // IN/OUTステータスフラグ
   bool mSawVideoInputEOS, mSawAudioInputEOS;
   bool mSawVideoOutputEOS, mSawAudioOutputEOS;
-
   bool mLastVideoFrameEnd;
   bool mLastAudioFrameEnd;
 
-  // メディアタイマー
+  // メディアクロック
   MediaClock mClock;
 
-  // デコード済みフレーム
+  // 出力ビデオフレーム
   mutable std::mutex mVideoFrameMutex;
   DecodedBuffer mDummyFrame;
   DecodedBuffer *mVideoFrame, *mVideoFrameNext;
   DecodedBuffer *mVideoFrameLastGet;
 
-  // オーディオ
+  // 内部オーディオエンジン
   bool mUseAudioEngine;
   AudioEngine *mAudioEngine;
+
+  // 出力オーディオフレーム管理
   std::mutex mAudioFrameMutex;
   size_t mAudioQueuedBytes;
-  size_t mAudioDataPos;
-  int32_t mAudioLastBufIndex;
-  int32_t mAudioUnitSize;
-  int64_t mAudioOutputFrames;
-  uint64_t mAudioCodecDelayUs;
+  int32_t mAudioUnitSize; // オーディオ1サンプルのサイズ
+  size_t mAudioDataPos;   // 現在出力中のバッファ内での位置
+  int64_t mAudioOutputFrames; // 現メディアクロック期間中に出力したフレーム数
+  uint64_t mAudioCodecDelayUs; // audio codec delay(出力しないマイナスフレーム長)
   struct
   {
     uint64_t base;         // 現在のフレーム先頭のPTS
@@ -159,6 +156,7 @@ private:
                            // (同PTSが複数パケットにわたるケースがあるのでその対応用)
     void Reset() { base = INT64_MAX, outputFrames = 0; }
   } mAudioTime;
+  int64_t mAudioResumeMediaTimeUs; // resume時に最速反映するための最終出力時刻
   std::queue<DecodedBuffer *> mAudioFrameQueue;
 
   // 同期用イベントフラグ
