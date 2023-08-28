@@ -171,35 +171,70 @@ VpxDecoder::CopyToDecodedBuffer(DecodedBuffer *dcBuf, uint64_t time, vpx_image *
   ASSERT(vpxImg != nullptr, "invalid image data.\n");
   ASSERT(dcBuf != nullptr, "invalid decoded buffer.\n");
 
-  if (vpxImg->fmt != VPX_IMG_FMT_I420 && vpxImg->fmt != VPX_IMG_FMT_YV12) {
+  bool swapUv = false;
+  PixelFormat srcFormat = PIXEL_FORMAT_I420;
+
+  switch (vpxImg->fmt) {
+  case VPX_IMG_FMT_YV12:
+    // YV12はI420のUVを入れ替えたもの
+    swapUv = true;
+    srcFormat = PIXEL_FORMAT_I420;
+    break;
+  case VPX_IMG_FMT_I420:
+    srcFormat = PIXEL_FORMAT_I420;
+    break;
+  case VPX_IMG_FMT_I422:
+    srcFormat = PIXEL_FORMAT_I422;
+    break;
+  case VPX_IMG_FMT_I444:
+    srcFormat = PIXEL_FORMAT_I444;
+    break;
+  // 未サポートリスト。必要に応じて適宜対応のこと
+  // case VPX_IMG_FMT_RGB24: break;
+  // case VPX_IMG_FMT_RGB32: break;
+  // case VPX_IMG_FMT_RGB565: break;
+  // case VPX_IMG_FMT_RGB555: break;
+  // case VPX_IMG_FMT_UYVY: break;
+  // case VPX_IMG_FMT_YUY2: break;
+  // case VPX_IMG_FMT_YVYU: break;
+  // case VPX_IMG_FMT_BGR24: break;
+  // case VPX_IMG_FMT_RGB32_LE: break;
+  // case VPX_IMG_FMT_ARGB: break;
+  // case VPX_IMG_FMT_ARGB_LE: break;
+  // case VPX_IMG_FMT_RGB565_LE: break;
+  // case VPX_IMG_FMT_RGB555_LE: break;
+  // case VPX_IMG_FMT_VPXYV12: break;
+  // case VPX_IMG_FMT_VPXI420: break;
+  // case VPX_IMG_FMT_444A: break;
+  // case VPX_IMG_FMT_I42016: break;
+  // case VPX_IMG_FMT_I42216: break;
+  // case VPX_IMG_FMT_I44416: break;
+  default:
     LOGE("unspported vpx image format: fmt=%d\n", vpxImg->fmt);
     return;
   }
 
-  // YV12はI420のUVを入れ替えたもの
-  bool swapUv = vpxImg->fmt == VPX_IMG_FMT_YV12;
   int uIndex  = swapUv ? VPX_PLANE_V : VPX_PLANE_U;
   int vIndex  = swapUv ? VPX_PLANE_U : VPX_PLANE_V;
 
   // src/dst params
-  PixelFormat srcFormat = PIXEL_FORMAT_I420;
   const uint8_t *yBuf   = vpxImg->planes[VPX_PLANE_Y];
   const uint8_t *uBuf   = vpxImg->planes[uIndex];
   const uint8_t *vBuf   = vpxImg->planes[vIndex];
-  const uint8_t *aBuf =
-    vpxImgAlpha ? vpxImgAlpha->planes[VPX_PLANE_Y] : vpxImg->planes[VPX_PLANE_ALPHA];
-  int32_t yStride = vpxImg->stride[VPX_PLANE_Y];
-  int32_t uStride = vpxImg->stride[uIndex];
-  int32_t vStride = vpxImg->stride[vIndex];
-  int32_t aStride =
-    vpxImgAlpha ? vpxImgAlpha->stride[VPX_PLANE_Y] : vpxImg->stride[VPX_PLANE_ALPHA];
+  const uint8_t *aBuf   = vpxImgAlpha ? vpxImgAlpha->planes[VPX_PLANE_Y]
+                                      : vpxImg->planes[VPX_PLANE_ALPHA];
+  int32_t yStride       = vpxImg->stride[VPX_PLANE_Y];
+  int32_t uStride       = vpxImg->stride[uIndex];
+  int32_t vStride       = vpxImg->stride[vIndex];
+  int32_t aStride       = vpxImgAlpha ? vpxImgAlpha->stride[VPX_PLANE_Y]
+                                      : vpxImg->stride[VPX_PLANE_ALPHA];
 
   // 一応想定外のケースをチェック
   ASSERT(uStride == vStride, "illegale u/v stride. unknown format?\n");
 
   // color
-  ColorRange colorRange =
-    (vpxImg->range == VPX_CR_STUDIO_RANGE) ? COLOR_RANGE_LIMITED : COLOR_RANGE_FULL;
+  ColorRange colorRange = (vpxImg->range == VPX_CR_STUDIO_RANGE) ? COLOR_RANGE_LIMITED
+                                                                 : COLOR_RANGE_FULL;
   ColorSpace colorSpace = COLOR_SPACE_UNKNOWN;
   switch (vpxImg->cs) {
   case VPX_CS_UNKNOWN:
