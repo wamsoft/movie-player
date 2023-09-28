@@ -138,9 +138,11 @@ private:
   DecodedBuffer *mVideoFrame, *mVideoFrameNext;
   DecodedBuffer *mVideoFrameLastGet;
 
+#ifdef INNER_AUDIOENGINE
   // 内部オーディオエンジン
   bool mUseAudioEngine;
   AudioEngine *mAudioEngine;
+#endif
 
   // 出力オーディオフレーム管理
   std::mutex mAudioFrameMutex;

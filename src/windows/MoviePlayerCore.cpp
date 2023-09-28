@@ -6,7 +6,10 @@
 MoviePlayerCore::MoviePlayerCore(PixelFormat pixelFormat, bool useAudioEngine)
 : mState(STATE_UNINIT)
 , mPixelFormat(pixelFormat)
+#ifdef INNER_AUDIOENGINE
 , mUseAudioEngine(useAudioEngine)
+, mAudioEngine(nullptr)
+#endif
 {
   Init();
 }
@@ -43,7 +46,6 @@ MoviePlayerCore::Init()
   mVideoFrameLastGet            = nullptr;
   mDummyFrame.InitByType(TRACK_TYPE_VIDEO, -1);
 
-  mAudioEngine            = nullptr;
   mAudioQueuedBytes       = 0;
   mAudioDataPos           = 0;
   mAudioUnitSize          = 0;
@@ -76,11 +78,13 @@ MoviePlayerCore::Done()
   Flush();
   StopThread();
 
+#ifdef INNER_AUDIOENGINE
   if (mUseAudioEngine && mAudioEngine) {
     mAudioEngine->Done();
     delete mAudioEngine;
     mAudioEngine = nullptr;
   }
+#endif
 
   if (mVideoDecoder) {
     mVideoDecoder->Stop();
@@ -385,6 +389,7 @@ MoviePlayerCore::SelectTargetTrack()
         break;
       }
 
+#ifdef INNER_AUDIOENGINE
       // 自前オーディオ再生の場合はAudioEngineを作成する
       if (mUseAudioEngine) {
         if (mAudioEngine != nullptr) {
@@ -394,6 +399,7 @@ MoviePlayerCore::SelectTargetTrack()
         mAudioEngine = new AudioEngine();
         mAudioEngine->Init(this, audioFormat, info.a.channels, info.a.sampleRate);
       }
+#endif
 
       mExtractor->SelectTrack(TRACK_TYPE_AUDIO, i);
 
@@ -1047,6 +1053,7 @@ MoviePlayerCore::PreLoadInput()
 void
 MoviePlayerCore::SetState(State newState)
 {
+#ifdef INNER_AUDIOENGINE
   if (mAudioEngine) {
     switch (newState) {
     case STATE_PLAY:
@@ -1061,7 +1068,7 @@ MoviePlayerCore::SetState(State newState)
       break;
     }
   }
-
+#endif
   mState = newState;
 }
 
@@ -1082,17 +1089,21 @@ MoviePlayerCore::IsCurrentState(State state) const
 void
 MoviePlayerCore::SetVolume(float volume)
 {
+#ifdef INNER_AUDIOENGINE
   if (IsAudioAvailable() && mUseAudioEngine) {
     mAudioEngine->SetVolume(volume);
   }
+#endif
 }
 
 float
 MoviePlayerCore::Volume() const
 {
   float volume = 1.0f;
+#ifdef INNER_AUDIOENGINE
   if (IsAudioAvailable() && mUseAudioEngine) {
     volume = mAudioEngine->Volume();
   }
+#endif
   return volume;
 }
