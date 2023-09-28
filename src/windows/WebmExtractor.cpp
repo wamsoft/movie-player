@@ -45,11 +45,18 @@ WebmExtractor::NestEggLogCallback(nestegg *ctx, unsigned int severity, char cons
                                   ...)
 {
 #if defined(DEBUG_INFO_NESTEGG)
+#ifndef VERBOSE
+  if (severity == NESTEGG_LOG_DEBUG) return;
+#endif
   va_list ap;
   va_start(ap, fmt);
   char buf[8192];
   int size = vsprintf(buf, fmt, ap);
-  LOGV("NestEgg %p: %s\n", ctx, buf);
+  if (severity >= NESTEGG_LOG_ERROR) { 
+    LOGE("NestEgg %p: %s\n", ctx, buf);
+  } else {
+    LOGV("NestEgg %p: %s\n", ctx, buf);
+  }
   va_end(ap);
 #endif
 }
