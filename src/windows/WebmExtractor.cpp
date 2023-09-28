@@ -13,6 +13,7 @@ WebmExtractor::WebmExtractor()
 , mVideoTrack(-1)
 , mAudioTrack(-1)
 , mPkt(nullptr)
+, mReader(nullptr)
 {
   mIsReachedEOS     = false;
   mIsFirstRead      = true;
@@ -56,19 +57,19 @@ WebmExtractor::NestEggLogCallback(nestegg *ctx, unsigned int severity, char cons
 int
 WebmExtractor::MyRead(void *buffer, size_t length, void *userdata)
 {
-  return ((WebmExtractor *)userdata)->mReader.Read(buffer, length);
+  return ((WebmExtractor *)userdata)->mReader->Read(buffer, length);
 }
 
 int
 WebmExtractor::MySeek(int64_t offset, int whence, void *userdata)
 {
-  return ((WebmExtractor *)userdata)->mReader.Seek(offset, whence);
+  return ((WebmExtractor *)userdata)->mReader->Seek(offset, whence);
 }
 
 int64_t
 WebmExtractor::MyTell(void *userdata)
 {
-  return ((WebmExtractor *)userdata)->mReader.Tell();
+  return ((WebmExtractor *)userdata)->mReader->Tell();
 }
 
 bool
@@ -79,8 +80,9 @@ WebmExtractor::Open(const std::string &filePath)
     return false;
   }
 
-  if (!mReader.Open(filePath.c_str())) {
-    LOGE("failed to open movie file: %s\n", filePath.c_str());
+  IMkvFileReader *reader;
+  if (!(mReader = IMkvFileReader::Create(filePath.c_str()))) {
+    LOGV("fail to open movie file: %s\n", filePath.c_str());
     return false;
   }
 

@@ -93,5 +93,5 @@ private:
   int64_t mDiscardPadding;
   bool mIsKeyFrame;
 
-  MkvFileReader mReader;
+  IMkvFileReader *mReader;
 };
