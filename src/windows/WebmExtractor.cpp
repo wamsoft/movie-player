@@ -29,6 +29,10 @@ WebmExtractor::WebmExtractor()
 
 WebmExtractor::~WebmExtractor()
 {
+  if (mPkt) {
+    nestegg_free_packet(mPkt);
+    mPkt = nullptr;
+  }
   if (mCtx) {
     nestegg_destroy(mCtx);
     mCtx = nullptr;

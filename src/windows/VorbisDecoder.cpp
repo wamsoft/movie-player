@@ -21,7 +21,7 @@ VorbisDecoder::VorbisDecoder(CodecId codecId)
 
 VorbisDecoder::~VorbisDecoder()
 {
-  mIsConfigured = false;
+  Done();
 }
 
 bool
@@ -87,12 +87,13 @@ err:
 bool
 VorbisDecoder::Done()
 {
-  vorbis_block_clear(&mVorbisBlock);
-  vorbis_dsp_clear(&mVorbisDsp);
-  vorbis_info_clear(&mVorbisInfo);
-  vorbis_comment_clear(&mVorbisComment);
-
-  mIsConfigured = false;
+  if (mIsConfigured) {
+    vorbis_block_clear(&mVorbisBlock);
+    vorbis_dsp_clear(&mVorbisDsp);
+    vorbis_info_clear(&mVorbisInfo);
+    vorbis_comment_clear(&mVorbisComment);
+    mIsConfigured = false;
+  }
   return true;
 }
 

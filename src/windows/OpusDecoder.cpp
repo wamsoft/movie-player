@@ -21,7 +21,7 @@ OpusAudioDecoder::OpusAudioDecoder(CodecId codecId)
 
 OpusAudioDecoder::~OpusAudioDecoder()
 {
-  mIsConfigured = false;
+  Done();
 }
 
 bool

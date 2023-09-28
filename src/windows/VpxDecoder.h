@@ -32,6 +32,7 @@ private:
 
 private:
   bool mIsConfigured;
+  bool mIsAlphaConfigured;
   PixelFormat mRgbFormat;
 
   vpx_codec_ctx_t mCodec;

@@ -13,6 +13,7 @@
 VpxDecoder::VpxDecoder(CodecId codecId)
 : VideoDecoder(codecId)
 , mIsConfigured(false)
+, mIsAlphaConfigured(false)
 , mRgbFormat(PIXEL_FORMAT_UNKNOWN)
 , mIface(nullptr)
 , mFlags(0)
@@ -33,7 +34,7 @@ VpxDecoder::VpxDecoder(CodecId codecId)
 
 VpxDecoder::~VpxDecoder()
 {
-  mIsConfigured = false;
+  Done();
 }
 
 const char *
@@ -65,9 +66,9 @@ VpxDecoder::Configure(const Config &conf)
   mAlphaMode = conf.vpx.alphaMode;
   if (vpx_codec_dec_init(&mCodec, mIface, &conf.vpx.decCfg, mFlags)) {
     CodecErrorMessage("failed to configure vpx decoder");
-    mIsConfigured = false;
     return false;
   }
+  mIsConfigured = true;
   mRgbFormat = conf.vpx.rgbFormat;
 
   ASSERT(mRgbFormat == PIXEL_FORMAT_UNKNOWN || is_rgb_pixel_format(mRgbFormat),
@@ -77,27 +78,30 @@ VpxDecoder::Configure(const Config &conf)
     // conf.vpx.rgbFormat = ;
     if (vpx_codec_dec_init(&mAlphaCodec, mIface, &conf.vpx.decCfg, mFlags)) {
       CodecErrorMessage("failed to configure vpx alpha decoder");
-      mIsConfigured = false;
+      Done();
       return false;
     }
+    mIsAlphaConfigured = true;
   }
 
-  mIsConfigured = true;
   return true;
 }
 
 bool
 VpxDecoder::Done()
 {
-  if (vpx_codec_destroy(&mCodec)) {
-    CodecErrorMessage("failed to destroy codec");
+  if (mIsConfigured) {
+    if (vpx_codec_destroy(&mCodec)) {
+      CodecErrorMessage("failed to destroy codec");
+    }
+    mIsConfigured = false;
   }
-  if (mAlphaMode) {
+  if (mIsAlphaConfigured) {
     if (vpx_codec_destroy(&mAlphaCodec)) {
       CodecErrorMessage("failed to destroy codec");
     }
+    mIsAlphaConfigured = false;
   }
-  mIsConfigured = false;
   return true;
 }
 
