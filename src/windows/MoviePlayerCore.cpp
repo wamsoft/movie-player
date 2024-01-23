@@ -757,9 +757,11 @@ MoviePlayerCore::Flush()
   // あるいは mDecodedFrameを毎回ポインタではなくコピー保持にする方法でも良いが
   // 現状ではポインタ保持なのでFlushの絡むseek処理のみこのように対応している。
   // (実際の所スレッド絡みなので毎回コピー保持したほうが丸いので、将来的にはそうなるかも)
-  mDummyFrame.CopyFrom(mVideoFrame, false);
-  SetVideoFrame(&mDummyFrame);
-  SetVideoFrameNext(nullptr);
+  if (mVideoFrame) {
+    mDummyFrame.CopyFrom(mVideoFrame, false);
+    SetVideoFrame(&mDummyFrame);
+    SetVideoFrameNext(nullptr);
+  }
 
   mVideoFrameLastGet = nullptr;
 
