@@ -62,9 +62,6 @@ if(WIN32)
 add_compile_options(/wd4819 /wd4244 /wd4267)
 endif()
 
-target_compile_definitions(${PROJ_NAME} PUBLIC
-	INNNER_AUDIOENGINE=1)
-
 add_library(${PROJ_NAME} STATIC
 	src/common/MessageLooper.cpp
 	src/common/PixelConvert.cpp
@@ -80,6 +77,9 @@ add_library(${PROJ_NAME} STATIC
 	src/windows/MoviePlayer.cpp
 	extlibs/nestegg/src/nestegg.c
 )
+
+target_compile_definitions(${PROJ_NAME} PUBLIC
+	INNER_AUDIOENGINE=1)
 
 target_include_directories(${PROJ_NAME} 
 PUBLIC 
