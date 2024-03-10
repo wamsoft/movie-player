@@ -436,6 +436,17 @@ MoviePlayer::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *frames
   return mPlayer->GetAudioFrame(frames, frameCount, framesRead, timeStampUs);
 }
 
+
+void 
+MoviePlayer::SetOnAudioDecoded(OnAudioDecoded func, void *userPtr)
+{
+  if (!mPlayer) {
+    LOGE("MoviePlayer: internal player is not running.\n");
+  }
+  mPlayer->SetOnAudioDecoded(func, userPtr);
+}
+
+
 IMoviePlayer *
 IMoviePlayer::CreateMoviePlayer(const char *filename, InitParam &param)
 {

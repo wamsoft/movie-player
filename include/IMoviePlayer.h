@@ -4,8 +4,6 @@
 #include <cstdio>
 #include <sys/types.h>
 
-// オーディオデコーダコールバック
-typedef int32_t (*OnAudioDecoded)(void *userPtr, uint8_t *data, size_t sizeBytes);
 
 class IMovieReadStream {
 public:
@@ -184,6 +182,14 @@ public:
   // 吸い上げられている状態で、外部には回せないようになっているので常にfalseを返す
   virtual bool GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
                              uint64_t *timeStampUs = nullptr) = 0;
+
+  // オーディオデコーダコールバック
+  typedef int32_t (*OnAudioDecoded)(void *userPtr, uint8_t *data, size_t sizeBytes);
+
+  // 出力オーディオ通知関数を取得する
+  // InitParam::useOwnAudioEngineがtrueの場合は、内部AudioEngine側にデータが
+  // 吸い上げられている状態で、外部には回せないようになっているので呼ばれない
+  virtual void SetOnAudioDecoded(OnAudioDecoded func, void *userPtr) = 0;
 
   static IMoviePlayer *CreateMoviePlayer(const char *filename, InitParam &param);
 

@@ -44,6 +44,8 @@ public:
   virtual bool GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
                              uint64_t *timeStampUs) override;
 
+  virtual void SetOnAudioDecoded(OnAudioDecoded func, void *userPtr);
+
 private:
   void Init();
   void Done();

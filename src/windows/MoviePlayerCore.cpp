@@ -10,6 +10,8 @@ MoviePlayerCore::MoviePlayerCore(PixelFormat pixelFormat, bool useAudioEngine)
 , mUseAudioEngine(useAudioEngine)
 , mAudioEngine(nullptr)
 #endif
+, mOnAudioDecoded(nullptr)
+, mOnAudioDecodedUserPtr(nullptr)
 {
   Init();
 }
@@ -905,12 +907,80 @@ MoviePlayerCore::CalcDiffVideoTimeAndNow(DecodedBuffer *targetFrame) const
 }
 
 void
-MoviePlayerCore::EnqueueAudio(DecodedBuffer *buf)
+MoviePlayerCore::EnqueueAudio(DecodedBuffer *data)
 {
   std::lock_guard<std::mutex> lock(mAudioFrameMutex);
 
-  mAudioFrameQueue.push(buf);
-  mAudioQueuedBytes += buf->dataSize;
+  if (mOnAudioDecoded) {
+
+    uint64_t readFrames = 0;
+    int64_t mediaTimeUs = 0;
+
+    uint64_t timeBase     = mAudioTime.base;
+    uint64_t outputFrames = mAudioTime.outputFrames;
+    uint64_t nextOutputFrames = outputFrames;
+    uint64_t nextTimeBase     = 0;
+
+    mOnAudioDecoded(mOnAudioDecodedUserPtr, data->data, data->dataSize);
+
+    mAudioDecoder->ReleaseDecodedBufferIndex(data->bufIndex);
+
+    // 時刻計算処理
+
+    if (timeBase != data->timeStampNs) {
+      timeBase         = data->timeStampNs;
+      outputFrames     = 0;
+      nextOutputFrames = 0;
+    }
+    nextTimeBase = data->timeStampNs;
+
+    uint64_t frames = data->dataSize / mAudioUnitSize;
+    readFrames += frames;
+    nextOutputFrames += frames;
+
+    // EOSバッファはフラグのみの空バッファなので打ち切り
+    if (data->isEndOfStream) {
+      // LOGV("audio last frame END\n");
+      mLastAudioFrameEnd = true;
+    }
+
+    // 現状では、ここが呼ばれた時点でそこまでの送出フレームが
+    // 再生されきった状態とみなす。より正確にするには、使用している
+    // オーディオエンジンの現在の再生位置を取得する必要がある。
+    int64_t sampleRate = mAudioDecoder->SampleRate();
+    int64_t timeOffset = calc_audio_duration_us(outputFrames, sampleRate);
+    mediaTimeUs        = ns_to_us(timeBase) + timeOffset - mAudioCodecDelayUs;
+    if (mediaTimeUs >= 0) {
+      if (!mClock.IsStarted()) {
+        mClock.SetStartMediaTime(mediaTimeUs);
+      }
+      mClock.SetPresentationTime(mediaTimeUs);
+
+      int64_t durationUs     = calc_audio_duration_us(readFrames, sampleRate);
+      int64_t maxMediaTimeUs = mediaTimeUs + durationUs;
+      int64_t nowUs          = get_time_us();
+      int64_t nowMediaUs     = mClock.GetStartMediaTime() +
+                           calc_audio_duration_us(mAudioOutputFrames, sampleRate);
+      mClock.UpdateAnchorTime(nowMediaUs, nowUs, maxMediaTimeUs);
+
+      // resumu時に最速でstart/anchorを復帰するために再生終了時点のPTSを保存
+      mAudioResumeMediaTimeUs = maxMediaTimeUs;
+    } else {
+      // negative timeはpresentationしてはいけないとmkv仕様書に記載なので読み捨て
+      // (作り上すでにメモリコピーしちゃってるけど、framesReadをいじって対応)
+      readFrames  = 0;
+      // LOGV("* negative pts *\n");
+    }
+
+    mAudioTime.base         = nextTimeBase;
+    mAudioTime.outputFrames = nextOutputFrames;
+
+    mAudioOutputFrames += readFrames;
+
+  } else {
+    mAudioFrameQueue.push(data);
+    mAudioQueuedBytes += data->dataSize;
+  }
 }
 
 bool

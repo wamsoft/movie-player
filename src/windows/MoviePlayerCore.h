@@ -79,6 +79,11 @@ public:
   bool GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
                      uint64_t *timeStampUs);
 
+  void SetOnAudioDecoded(IMoviePlayer::OnAudioDecoded func, void *userPtr) {
+    mOnAudioDecoded = func;
+    mOnAudioDecodedUserPtr = userPtr;
+  }
+
   // 入力をプリロードする
   void PreLoadInput();
 
@@ -163,6 +168,10 @@ private:
   } mAudioTime;
   int64_t mAudioResumeMediaTimeUs; // resume時に最速反映するための最終出力時刻
   std::queue<DecodedBuffer *> mAudioFrameQueue;
+
+  // デコード後のコールバック
+  IMoviePlayer::OnAudioDecoded mOnAudioDecoded;
+  void *mOnAudioDecodedUserPtr;
 
   // 同期用イベントフラグ
   enum
