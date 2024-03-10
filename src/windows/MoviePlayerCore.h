@@ -44,6 +44,8 @@ public:
   void Done();
 
   bool Open(const char *filepath);
+  bool Open(IMovieReadStream *stream);
+
   void Play(bool loop = false);
   void Stop();
   void Pause();
@@ -83,6 +85,7 @@ public:
 protected:
   virtual void HandleMessage(int32_t what, int64_t arg, void *data) override;
 
+  void OpenSetup();
   void InitStatusFlags();
   void SelectTargetTrack();
   void Start();

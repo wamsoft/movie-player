@@ -44,6 +44,7 @@ public:
   ~WebmExtractor();
 
   bool Open(const std::string &filePath);
+  bool Open(IMovieReadStream *stream);
   bool SeekTo(long long positionUs);
 
   uint64_t GetDurationUs() const { return mDurationUs; }
@@ -62,6 +63,8 @@ public:
   bool IsReachedEOS() const { return mIsReachedEOS; }
 
 private:
+  bool OpenSetup();
+
   static void NestEggLogCallback(nestegg *ctx, unsigned int severity, char const *fmt,
                                  ...);
   static int MyRead(void *buffer, size_t length, void *userdata);

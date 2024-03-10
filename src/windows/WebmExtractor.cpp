@@ -38,6 +38,10 @@ WebmExtractor::~WebmExtractor()
     nestegg_destroy(mCtx);
     mCtx = nullptr;
   }
+  if (mReader) {
+    delete mReader;
+    mReader = nullptr;
+  }
 }
 
 void
@@ -87,12 +91,34 @@ WebmExtractor::Open(const std::string &filePath)
     return false;
   }
 
-  IMkvFileReader *reader;
   if (!(mReader = IMkvFileReader::Create(filePath.c_str()))) {
     LOGV("fail to open movie file: %s\n", filePath.c_str());
     return false;
   }
 
+  return OpenSetup();
+}
+
+
+bool
+WebmExtractor::Open(IMovieReadStream *stream)
+{
+  if (!stream) {
+    LOGE("invalid stream.\n");
+    return false;
+  }
+
+  if (!(mReader = IMkvFileReader::Create(stream))) {
+    LOGV("fail to open movie stream\n");
+    return false;
+  }
+
+  return OpenSetup();
+}
+
+bool
+WebmExtractor::OpenSetup()
+{
   int ret;
 
   nestegg_io io = { &MyRead, &MySeek, &MyTell, this };

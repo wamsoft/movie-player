@@ -12,6 +12,7 @@ public:
   virtual ~MoviePlayer();
 
   bool Open(const char *filepath);
+  bool Open(IMovieReadStream *stream);
 
   virtual void Play(bool loop = false) override;
   virtual void Stop() override;

@@ -7,6 +7,17 @@
 // オーディオデコーダコールバック
 typedef int32_t (*OnAudioDecoded)(void *userPtr, uint8_t *data, size_t sizeBytes);
 
+class IMovieReadStream {
+public:
+    virtual int AddRef(void) = 0;
+    virtual int Release(void) = 0;
+    virtual size_t Read(void *buf, size_t size) = 0;
+    virtual int64_t Tell() const = 0;
+    virtual void Seek(int64_t offset, int origin) = 0;
+    virtual size_t Size() const = 0;
+};
+
+
 class IMoviePlayer
 {
 public:
@@ -175,4 +186,6 @@ public:
                              uint64_t *timeStampUs = nullptr) = 0;
 
   static IMoviePlayer *CreateMoviePlayer(const char *filename, InitParam &param);
+
+  static IMoviePlayer *CreateMoviePlayer(IMovieReadStream *stream, InitParam &param);
 };

@@ -426,7 +426,26 @@ MoviePlayerCore::Open(const char *filepath)
     LOGV("failed to create Extractor\n");
     return false;
   }
+  OpenSetup();
+  return true;
+}
 
+bool
+MoviePlayerCore::Open(IMovieReadStream *stream)
+{
+  mExtractor   = new WebmExtractor();
+  bool success = mExtractor->Open(stream);
+  if (!success) {
+    LOGV("failed to create Extractor\n");
+    return false;
+  }
+  OpenSetup();
+  return true;
+}
+
+void
+MoviePlayerCore::OpenSetup()
+{
   mClock.SetDuration(mExtractor->GetDurationUs());
 
   SelectTargetTrack();
@@ -435,8 +454,6 @@ MoviePlayerCore::Open(const char *filepath)
 
   // Play() がかかるまでプリロードする
   PreLoadInput();
-
-  return true;
 }
 
 void

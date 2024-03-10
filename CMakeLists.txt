@@ -73,6 +73,7 @@ add_library(${PROJ_NAME} STATIC
 	src/windows/OpusDecoder.cpp
 	src/windows/WebmExtractor.cpp
 	src/windows/MkvFileReader.cpp
+	src/windows/MkvStreamReader.cpp
 	src/windows/MoviePlayerCore.cpp
 	src/windows/MoviePlayer.cpp
 	extlibs/nestegg/src/nestegg.c
