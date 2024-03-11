@@ -128,6 +128,16 @@ MoviePlayer::Open(IMovieReadStream *stream)
   return mPlayer->Open(stream);
 }
 
+IMoviePlayer::State 
+MoviePlayer::GetState() const
+{
+  if (mPlayer) {
+    return (IMoviePlayer::State)mPlayer->GetState();
+  } else {
+    return State::STATE_UNINIT;
+  }
+}
+
 
 void
 MoviePlayer::Play(bool loop)
@@ -436,6 +446,44 @@ MoviePlayer::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *frames
   return mPlayer->GetAudioFrame(frames, frameCount, framesRead, timeStampUs);
 }
 
+void 
+MoviePlayer::SetOnState(OnState func, void *userPtr)
+{
+  if (!mPlayer) {
+    LOGE("MoviePlayer: internal player is not running.\n");
+  }
+  mPlayer->SetOnState([func, userPtr](MoviePlayerCore::State state) {
+    func(userPtr, (IMoviePlayer::State)state);
+  });
+}
+
+
+void 
+MoviePlayer::SetOnVideoDecoded(OnVideoDecoded func, void *userPtr)
+{
+  if (!mPlayer) {
+    LOGE("MoviePlayer: internal player is not running.\n");
+  }
+  auto format = conv_pixel_format(mPlayer->OutputPixelFormat());
+  mPlayer->SetOnVideoDecoded([func, userPtr, format](const DecodedBuffer *data) {
+    // 情報つめなおし
+    VideoFrame frame;
+    frame.colorFormat = format;
+    frame.colorSpace  = (IMoviePlayer::ColorSpace)data->v.colorSpace;
+    frame.colorRange  = (IMoviePlayer::ColorRange)data->v.colorRange;
+    frame.width         = data->v.width;
+    frame.height        = data->v.height;
+    frame.displayWidth  = data->v.displayWidth;
+    frame.displayHeight = data->v.displayHeight;
+    frame.data          = data->data;
+    frame.dataSize      = data->dataSize;
+    for (int planeIdx = 0; planeIdx < VIDEO_PLANE_COUNT; planeIdx++) {
+      frame.planes[planeIdx] = data->v.planes[planeIdx];
+      frame.stride[planeIdx] = data->v.stride[planeIdx];
+    }
+    func(userPtr, &frame);
+  });
+}
 
 void 
 MoviePlayer::SetOnAudioDecoded(OnAudioDecoded func, void *userPtr)
@@ -443,9 +491,10 @@ MoviePlayer::SetOnAudioDecoded(OnAudioDecoded func, void *userPtr)
   if (!mPlayer) {
     LOGE("MoviePlayer: internal player is not running.\n");
   }
-  mPlayer->SetOnAudioDecoded(func, userPtr);
+  mPlayer->SetOnAudioDecoded([func, userPtr](const uint8_t *data, size_t size) {
+    func(userPtr, data, size);
+  });
 }
-
 
 IMoviePlayer *
 IMoviePlayer::CreateMoviePlayer(const char *filename, InitParam &param)

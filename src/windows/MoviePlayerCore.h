@@ -5,7 +5,7 @@
 #include "WebmExtractor.h"
 #include "Decoder.h"
 #include "MediaClock.h"
-#include "IMoviePlayer.h"
+#include <functional>
 
 class AudioEngine;
 
@@ -79,13 +79,22 @@ public:
   bool GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
                      uint64_t *timeStampUs);
 
-  void SetOnAudioDecoded(IMoviePlayer::OnAudioDecoded func, void *userPtr) {
-    mOnAudioDecoded = func;
-    mOnAudioDecodedUserPtr = userPtr;
+  void SetOnState(std::function<void(State)> func) {
+    mOnStateFunc = func;
+  }
+
+  void SetOnAudioDecoded(std::function<void(const uint8_t *, size_t)> func) {
+    mOnAudioDecodedFunc = func;
+  }
+
+  void SetOnVideoDecoded(std::function<void(const DecodedBuffer *)> func) {
+    mOnVideoDecodedFunc = func;
   }
 
   // 入力をプリロードする
   void PreLoadInput();
+
+  State GetState() const;
 
 protected:
   virtual void HandleMessage(int32_t what, int64_t arg, void *data) override;
@@ -102,7 +111,6 @@ protected:
   void Flush();
 
   void SetState(State newState);
-  State GetState() const;
   bool IsCurrentState(State state) const;
 
   void InitDummyFrame();
@@ -112,6 +120,7 @@ protected:
   int64_t CalcDiffVideoTimeAndNow(DecodedBuffer *targetFrame) const;
 
   void EnqueueAudio(DecodedBuffer *buf);
+  void EnqueueVideo(DecodedBuffer *buf);
 
 private:
   // ステート
@@ -169,9 +178,9 @@ private:
   int64_t mAudioResumeMediaTimeUs; // resume時に最速反映するための最終出力時刻
   std::queue<DecodedBuffer *> mAudioFrameQueue;
 
-  // デコード後のコールバック
-  IMoviePlayer::OnAudioDecoded mOnAudioDecoded;
-  void *mOnAudioDecodedUserPtr;
+  std::function<void(State)> mOnStateFunc;
+  std::function<void(const DecodedBuffer *)> mOnVideoDecodedFunc;
+  std::function<void(const uint8_t *, size_t)> mOnAudioDecodedFunc;
 
   // 同期用イベントフラグ
   enum

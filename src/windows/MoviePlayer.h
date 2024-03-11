@@ -14,6 +14,8 @@ public:
   bool Open(const char *filepath);
   bool Open(IMovieReadStream *stream);
 
+  virtual State GetState() const override;
+
   virtual void Play(bool loop = false) override;
   virtual void Stop() override;
   virtual void Pause() override;
@@ -43,6 +45,10 @@ public:
   virtual bool GetVideoFrame(VideoFrame *frame, uint64_t *timeStampUs) override;
   virtual bool GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
                              uint64_t *timeStampUs) override;
+
+  virtual void SetOnState(OnState func, void *userPtr);
+
+  virtual void SetOnVideoDecoded(OnVideoDecoded func, void *userPtr);
 
   virtual void SetOnAudioDecoded(OnAudioDecoded func, void *userPtr);
 

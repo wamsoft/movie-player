@@ -10,8 +10,9 @@ MoviePlayerCore::MoviePlayerCore(PixelFormat pixelFormat, bool useAudioEngine)
 , mUseAudioEngine(useAudioEngine)
 , mAudioEngine(nullptr)
 #endif
-, mOnAudioDecoded(nullptr)
-, mOnAudioDecodedUserPtr(nullptr)
+, mOnStateFunc(nullptr)
+, mOnAudioDecodedFunc(nullptr)
+, mOnVideoDecodedFunc(nullptr)
 {
   Init();
 }
@@ -70,6 +71,7 @@ MoviePlayerCore::InitDummyFrame()
       std::lock_guard<std::mutex> lock(mVideoFrameMutex);
 
       mVideoFrame = &mDummyFrame;
+      EnqueueVideo(mVideoFrame);
     }
   }
 }
@@ -104,6 +106,10 @@ MoviePlayerCore::Done()
     delete mExtractor;
     mExtractor = nullptr;
   }
+
+  mOnStateFunc = nullptr;
+  mOnAudioDecodedFunc = nullptr;
+  mOnVideoDecodedFunc = nullptr;
 }
 
 void
@@ -585,7 +591,7 @@ MoviePlayerCore::HandleVideoOutput()
         // フレームスキップ判断のスレッショルド: 1/2フレーム遅れたら飛ばす
         int64_t frameSkipThresh = s_to_us(1 / mFrameRate / 2);
         int64_t timeDiff        = CalcDiffVideoTimeAndNow(mVideoFrameNext);
-        if (timeDiff >= frameSkipThresh) {
+        if (false && timeDiff >= frameSkipThresh) {
           // フレームスキップ
           LOGV("*** video frame skipped: frame=%" PRId64 ", pts=%" PRId64
                ", diff=%" PRId64 ", thresh=%" PRId64 "\n",
@@ -835,6 +841,8 @@ MoviePlayerCore::SetVideoFrame(DecodedBuffer *newFrame)
     DecodedBuffer *prevFrame = mVideoFrame;
     mVideoFrame              = newFrame;
 
+    EnqueueVideo(mVideoFrame);
+
     // LOGV("new video frame: pts=%" PRId64 " us\n", ns_to_us(mVideoFrame->timeStampNs));
 
     // 前フレームがダミーフレームでなければ開放
@@ -911,7 +919,7 @@ MoviePlayerCore::EnqueueAudio(DecodedBuffer *data)
 {
   std::lock_guard<std::mutex> lock(mAudioFrameMutex);
 
-  if (mOnAudioDecoded) {
+  if (mOnAudioDecodedFunc) {
 
     uint64_t readFrames = 0;
     int64_t mediaTimeUs = 0;
@@ -921,7 +929,7 @@ MoviePlayerCore::EnqueueAudio(DecodedBuffer *data)
     uint64_t nextOutputFrames = outputFrames;
     uint64_t nextTimeBase     = 0;
 
-    mOnAudioDecoded(mOnAudioDecodedUserPtr, data->data, data->dataSize);
+    mOnAudioDecodedFunc(data->data, data->dataSize);
 
     mAudioDecoder->ReleaseDecodedBufferIndex(data->bufIndex);
 
@@ -980,6 +988,14 @@ MoviePlayerCore::EnqueueAudio(DecodedBuffer *data)
   } else {
     mAudioFrameQueue.push(data);
     mAudioQueuedBytes += data->dataSize;
+  }
+}
+
+void
+MoviePlayerCore::EnqueueVideo(DecodedBuffer *data)
+{
+  if (mOnVideoDecodedFunc) {
+    mOnVideoDecodedFunc(data);
   }
 }
 
@@ -1159,6 +1175,10 @@ MoviePlayerCore::SetState(State newState)
   }
 #endif
   mState = newState;
+
+  if (mOnStateFunc) {
+    mOnStateFunc(mState);
+  }
 }
 
 MoviePlayerCore::State

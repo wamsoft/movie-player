@@ -100,6 +100,17 @@ public:
     VIDEO_PLANE_COUNT
   };
 
+  enum State
+  {
+    STATE_UNINIT,
+    STATE_OPEN,
+    STATE_PRELOADING,
+    STATE_PLAY,
+    STATE_PAUSE,
+    STATE_STOP,
+    STATE_FINISH,
+  };
+
   // ビデオフレーム
   // *dataの内容は、次のGetVideoFrame()呼び出しでtrueが返る
   // (VideoFrameが更新される)まで有効なので、必要なら適宜コピー保持すること
@@ -138,6 +149,12 @@ public:
 
   IMoviePlayer() {}
   virtual ~IMoviePlayer() {}
+
+  virtual State GetState() const = 0;
+
+  typedef int32_t (*OnState)(void *userPtr, State state);
+
+  virtual void SetOnState(OnState func, void *userPtr) = 0;
 
   virtual void Play(bool loop = false) = 0;
   virtual void Stop()                  = 0;
@@ -183,8 +200,13 @@ public:
   virtual bool GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
                              uint64_t *timeStampUs = nullptr) = 0;
 
+  // ビデオデコーダコールバック
+  typedef void (*OnVideoDecoded)(void *userPtr, VideoFrame *frame);
+
+  virtual void SetOnVideoDecoded(OnVideoDecoded func, void *userPtr) = 0;
+
   // オーディオデコーダコールバック
-  typedef int32_t (*OnAudioDecoded)(void *userPtr, uint8_t *data, size_t sizeBytes);
+  typedef int32_t (*OnAudioDecoded)(void *userPtr, const uint8_t *data, size_t sizeBytes);
 
   // 出力オーディオ通知関数を取得する
   // InitParam::useOwnAudioEngineがtrueの場合は、内部AudioEngine側にデータが
