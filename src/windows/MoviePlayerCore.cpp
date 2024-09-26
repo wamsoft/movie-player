@@ -675,7 +675,7 @@ MoviePlayerCore::Decode()
       Post(MSG_SEEK, 0);
       Post(MSG_DECODE);
     } else {
-      Post(MSG_STOP);
+      Post(MSG_FINISH);
     }
   } else {
     Post(MSG_DECODE);
@@ -757,6 +757,13 @@ MoviePlayerCore::HandleMessage(int32_t what, int64_t arg, void *data)
   case MSG_STOP:
     SetVideoFrame(&mDummyFrame);
     SetState(STATE_STOP);
+    Post(MSG_NOP, 0, nullptr, true); // flush msg
+    mEventFlag.Set(EVENT_FLAG_STOPPED);
+    break;
+
+  case MSG_FINISH:
+    SetVideoFrame(&mDummyFrame);
+    SetState(STATE_FINISH);
     Post(MSG_NOP, 0, nullptr, true); // flush msg
     mEventFlag.Set(EVENT_FLAG_STOPPED);
     break;
@@ -1166,6 +1173,7 @@ MoviePlayerCore::SetState(State newState)
       break;
     case STATE_PAUSE:
     case STATE_STOP:
+    case STATE_FINISH:
       mAudioEngine->Stop();
       break;
     default:
@@ -1174,10 +1182,11 @@ MoviePlayerCore::SetState(State newState)
     }
   }
 #endif
-  mState = newState;
-
-  if (mOnStateFunc) {
-    mOnStateFunc(mState);
+  if (mState != newState) {
+    mState = newState;
+    if (mOnStateFunc) {
+      mOnStateFunc(mState);
+    }
   }
 }
 

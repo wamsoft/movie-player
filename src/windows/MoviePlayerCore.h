@@ -23,6 +23,7 @@ public:
     MSG_SET_LOOP,
     MSG_SEEK,
     MSG_STOP,
+    MSG_FINISH
   };
 
   enum State

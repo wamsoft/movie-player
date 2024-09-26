@@ -107,8 +107,8 @@ public:
     STATE_PRELOADING,
     STATE_PLAY,
     STATE_PAUSE,
-    STATE_STOP,
-    STATE_FINISH,
+    STATE_STOP, // 停止された
+    STATE_FINISH, // 再生終了した
   };
 
   // ビデオフレーム
