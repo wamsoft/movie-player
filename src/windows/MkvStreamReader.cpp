@@ -5,7 +5,6 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <windows.h>
 
 class MkvIStreamReader : public IMkvFileReader
 {
