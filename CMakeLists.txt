@@ -87,7 +87,6 @@ PUBLIC
 	include
 PRIVATE
 	src/windows
-	extlibs/miniaudio
 	extlibs/nestegg/include
 	extlibs/libyuv/include
 	)
@@ -126,6 +125,10 @@ target_link_libraries(${PROJ_NAME} PUBLIC Vorbis::vorbis)
 # opus
 find_package(Opus CONFIG REQUIRED)
 target_link_libraries(${PROJ_NAME} PUBLIC Opus::opus)
+
+#  miniaudio
+find_path(MINIAUDIO_INCLUDE_DIRS "miniaudio.h")
+target_include_directories(${PROJ_NAME} PRIVATE ${MINIAUDIO_INCLUDE_DIRS})
 
 endif()
 
