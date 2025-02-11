@@ -649,6 +649,9 @@ MoviePlayerCore::HandleAudioOutput()
         EnqueueAudio(buf);
         isFrameReady = true;
       }
+    } else {
+      // デコード結果がない
+      break;
     }
   } while (isPreloading && !isFrameReady);
 }
