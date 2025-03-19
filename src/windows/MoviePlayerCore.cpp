@@ -575,6 +575,7 @@ MoviePlayerCore::HandleVideoOutput()
       } else if (isFrameSkipping) {
         // フレームスキップ解消中にデコード結果を吸い上げきった
         isFrameSkipping = false;
+        std::this_thread::yield();
       }
     }
 
@@ -650,8 +651,7 @@ MoviePlayerCore::HandleAudioOutput()
         isFrameReady = true;
       }
     } else {
-      // デコード結果がない
-      break;
+      std::this_thread::yield();
     }
   } while (isPreloading && !isFrameReady);
 }
