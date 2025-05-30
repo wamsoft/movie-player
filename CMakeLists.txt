@@ -23,6 +23,8 @@ endif()
 set(PROJ_NAME movieplayer)
 project(${PROJ_NAME})
 
+option(MOVIEPLAYER_EXTERNAL_MINIAUDIO "use external miniaudio" OFF)
+
 # ------------------------------------------------------------------------------
 # Win64チェック / 必ず project() 以後に呼ぶ
 #   ${CMAKE_GENERATOR_PLATFORM}はcmake実行時に-Aオプションで渡してやらないと
@@ -80,7 +82,14 @@ add_library(${PROJ_NAME} STATIC
 )
 
 target_compile_definitions(${PROJ_NAME} PUBLIC
-	INNER_AUDIOENGINE=1)
+	INNER_AUDIOENGINE=1
+)
+
+if(MOVIEPLAYER_EXTERNAL_MINIAUDIO)
+target_compile_definitions(${PROJ_NAME} PUBLIC
+	EXTERNAL_MINIAUDIO=1
+)
+endif()
 
 target_include_directories(${PROJ_NAME} 
 PUBLIC 

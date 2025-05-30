@@ -3,6 +3,17 @@
 #include "AudioEngine.h"
 #include "MoviePlayerCore.h"
 
+#ifdef EXTERNAL_MINIAUDIO
+
+#include "miniaudio.h"
+extern ma_engine *GetMiniAudioEngine();
+
+static void DoneMiniAudio() {
+  // nothing to do
+}
+
+#else
+
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
 
@@ -18,6 +29,41 @@ my_ma_logger(void *pUserData, ma_uint32 level, const char *pMessage)
     LOGV("miniaudio: %s\n", pMessage);
   }
 }
+
+static ma_engine *gEngine = NULL;
+
+static void InitMiniAudio() 
+{
+  if (!gEngine) {
+    gEngine = (ma_engine *)malloc(sizeof(ma_engine));
+    if (gEngine) {
+      ma_engine_set_log_callback(gEngine, my_ma_logger, NULL);
+      // エンジン初期化
+      ma_result result = ma_engine_init(NULL, gEngine);
+      if (result != MA_SUCCESS) {
+        LOGE("failed to initialize miniaudio engine: err=%d\n", result);
+      }
+    }
+  }
+}
+
+ma_engine *GetMiniAudioEngine() 
+{
+  if (!gEngine) {
+    InitMiniAudio();
+  }
+  return gEngine;
+}
+
+static void DoneMiniAudio() {
+  if (gEngine) {
+    ma_engine_uninit(gEngine);
+    free(gEngine);
+    gEngine = NULL;
+  }
+}
+
+#endif // EXTERNAL_MINIAUDIO
 
 // -----------------------------------------------------------------------------
 // miniaudio data source vtable
@@ -106,15 +152,6 @@ AudioEngine::Init(MoviePlayerCore *player, AudioFormat format, int32_t channels,
 {
   mPlayer = player;
 
-  ma_log_callback_init(my_ma_logger, NULL);
-
-  // エンジン初期化
-  ma_result result = ma_engine_init(NULL, &mEngine);
-  if (result != MA_SUCCESS) {
-    LOGE("failed to initialize miniaudio engine: err=%d\n", result);
-    return false;
-  }
-
   // ソース初期化
   ma_format mf = ma_format_unknown;
   switch (format) {
@@ -143,14 +180,14 @@ AudioEngine::Init(MoviePlayerCore *player, AudioFormat format, int32_t channels,
   auto dataSourceConfig   = ma_data_source_config_init();
   dataSourceConfig.vtable = &s_my_data_source_vtable;
 
-  result = ma_data_source_init(&dataSourceConfig, &mSource);
+  ma_result result = ma_data_source_init(&dataSourceConfig, &mSource);
   if (result != MA_SUCCESS) {
     LOGE("failed to initialize miniaudio data source: err=%d\n", result);
     return false;
   }
 
   // サウンド初期化
-  result = ma_sound_init_from_data_source(&mEngine, &mSource, 0, NULL, &mSound);
+  result = ma_sound_init_from_data_source(GetMiniAudioEngine(), &mSource, 0, NULL, &mSound);
   if (result != MA_SUCCESS) {
     LOGE("failed to initialize miniaudio sound engine: err=%d\n", result);
     return false;
@@ -169,7 +206,7 @@ void
 AudioEngine::Done()
 {
   Stop();
-  ma_engine_uninit(&mEngine);
+  DoneMiniAudio();
 }
 
 void

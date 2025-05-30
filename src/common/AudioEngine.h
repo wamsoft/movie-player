@@ -41,7 +41,6 @@ public:
 private:
   float mVolume;
   ma_sound mSound;
-  ma_engine mEngine;
   my_data_source mSource;
   int32_t mFrameSize;
 
