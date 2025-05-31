@@ -5,6 +5,8 @@
 
 #ifdef EXTERNAL_MINIAUDIO
 
+#define MA_NO_RESOURCE_MANAGER
+#define MA_USE_STDINT
 #include "miniaudio.h"
 extern ma_engine *GetMiniAudioEngine();
 
@@ -15,6 +17,8 @@ static void DoneMiniAudio() {
 #else
 
 #define MINIAUDIO_IMPLEMENTATION
+#define MA_NO_RESOURCE_MANAGER
+#define MA_USE_STDINT
 #include "miniaudio.h"
 
 // -----------------------------------------------------------------------------
