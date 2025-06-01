@@ -8,6 +8,9 @@
 
 #include "miniaudio.h"
 
+// コールバック関数の型定義
+typedef bool (*AudioCallback)(void* userData, uint8_t* buffer, uint64_t frameCount, uint64_t* framesRead);
+
 class MoviePlayerCore;
 
 class AudioEngine;
@@ -26,7 +29,7 @@ public:
   AudioEngine();
   ~AudioEngine();
 
-  bool Init(MoviePlayerCore *player, AudioFormat format, int32_t channels,
+  bool Init(AudioCallback callback, void* userData, AudioFormat format, int32_t channels,
             int32_t sampleRate);
   void Done();
 
@@ -44,5 +47,6 @@ private:
   my_data_source mSource;
   int32_t mFrameSize;
 
-  MoviePlayerCore *mPlayer;
+  AudioCallback mAudioCallback;
+  void* mUserData;
 };

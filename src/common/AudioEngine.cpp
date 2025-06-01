@@ -1,7 +1,6 @@
 #define MYLOG_TAG "AudioEngine"
 #include "BasicLog.h"
 #include "AudioEngine.h"
-#include "MoviePlayerCore.h"
 
 #ifdef EXTERNAL_MINIAUDIO
 
@@ -41,7 +40,7 @@ static void InitMiniAudio()
   if (!gEngine) {
     gEngine = (ma_engine *)malloc(sizeof(ma_engine));
     if (gEngine) {
-      ma_engine_set_log_callback(gEngine, my_ma_logger, NULL);
+      ma_log_callback_init(my_ma_logger, NULL);
       // エンジン初期化
       ma_result result = ma_engine_init(NULL, gEngine);
       if (result != MA_SUCCESS) {
@@ -145,16 +144,17 @@ static ma_data_source_vtable s_my_data_source_vtable = {
 // AudioEngine
 // -----------------------------------------------------------------------------
 AudioEngine::AudioEngine()
-: mPlayer(nullptr)
+: mAudioCallback(nullptr), mUserData(nullptr)
 {}
 
 AudioEngine::~AudioEngine() {}
 
 bool
-AudioEngine::Init(MoviePlayerCore *player, AudioFormat format, int32_t channels,
+AudioEngine::Init(AudioCallback callback, void* userData, AudioFormat format, int32_t channels,
                   int32_t sampleRate)
 {
-  mPlayer = player;
+  mAudioCallback = callback;
+  mUserData = userData;
 
   // ソース初期化
   ma_format mf = ma_format_unknown;
@@ -264,9 +264,9 @@ AudioEngine::ReadData(void *pFramesOut, ma_uint64 frameCount, ma_uint64 *pFrames
   ma_uint64 framesRead = 0;
   size_t bytesToRead   = frameCount * mFrameSize;
 
-  if (mPlayer) {
-    updated = mPlayer->GetAudioFrame((uint8_t *)pFramesOut, frameCount,
-                                     (uint64_t *)&framesRead, nullptr);
+  if (mAudioCallback) {
+    updated = mAudioCallback(mUserData, (uint8_t *)pFramesOut, frameCount,
+                            (uint64_t *)&framesRead);
   }
 
 #if 0

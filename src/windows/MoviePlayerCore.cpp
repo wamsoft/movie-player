@@ -3,6 +3,16 @@
 #include "MoviePlayerCore.h"
 #include "AudioEngine.h"
 
+// 静的コールバック関数を追加
+static bool AudioDataCallback(void* userData, uint8_t* buffer, uint64_t frameCount, uint64_t* framesRead)
+{
+  MoviePlayerCore* player = static_cast<MoviePlayerCore*>(userData);
+  if (player) {
+    return player->GetAudioFrame(buffer, frameCount, framesRead, nullptr);
+  }
+  return false;
+}
+
 MoviePlayerCore::MoviePlayerCore(PixelFormat pixelFormat, bool useAudioEngine)
 : mState(STATE_UNINIT)
 , mPixelFormat(pixelFormat)
@@ -405,7 +415,7 @@ MoviePlayerCore::SelectTargetTrack()
           delete mAudioEngine;
         }
         mAudioEngine = new AudioEngine();
-        mAudioEngine->Init(this, audioFormat, info.a.channels, info.a.sampleRate);
+        mAudioEngine->Init(AudioDataCallback, this, audioFormat, info.a.channels, info.a.sampleRate);
       }
 #endif
 
