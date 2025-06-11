@@ -38,7 +38,7 @@ public:
   };
 
 public:
-  MoviePlayerCore(PixelFormat pixelFormat, bool useAudioEngine);
+  MoviePlayerCore(PixelFormat pixelFormat, bool useAudioEngine=true);
   virtual ~MoviePlayerCore();
 
   void Init();
@@ -158,7 +158,6 @@ private:
 
 #ifdef INNER_AUDIOENGINE
   // 内部オーディオエンジン
-  bool mUseAudioEngine;
   AudioEngine *mAudioEngine;
 #endif
 

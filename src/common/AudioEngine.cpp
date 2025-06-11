@@ -144,8 +144,11 @@ static ma_data_source_vtable s_my_data_source_vtable = {
 // AudioEngine
 // -----------------------------------------------------------------------------
 AudioEngine::AudioEngine()
-: mAudioCallback(nullptr), mUserData(nullptr)
-{}
+: mAudioCallback(nullptr), mUserData(nullptr), mInited(false)
+{
+  // 先行して初期化しておく
+  (void)GetMiniAudioEngine();
+}
 
 AudioEngine::~AudioEngine() {}
 
@@ -153,6 +156,10 @@ bool
 AudioEngine::Init(AudioCallback callback, void* userData, AudioFormat format, int32_t channels,
                   int32_t sampleRate)
 {
+  if (mInited) {
+    Done();
+  }
+
   mAudioCallback = callback;
   mUserData = userData;
 
@@ -203,14 +210,19 @@ AudioEngine::Init(AudioCallback callback, void* userData, AudioFormat format, in
 
   // LOGV("miniaudio engine initialized!\n");
 
+  mInited = true;
   return true;
 }
 
 void
 AudioEngine::Done()
 {
-  Stop();
-  DoneMiniAudio();
+  if (mInited) {
+    Stop();
+    ma_sound_uninit(&mSound);
+    ma_data_source_uninit(&mSource);
+    mInited = false;
+  }
 }
 
 void
@@ -220,6 +232,10 @@ AudioEngine::Start()
   // 多重startはma_sound_start()内部でケアされている
   // engine的にチェックが必要な場合は、自前でフラグを管理するか
   // ma_sound_is_playing()を使って内部状態を確認するかで対応可能。
+  if (!mInited) {
+    LOGE("AudioEngine is not initialized.\n");
+    return;
+  }
   ma_result result = ma_sound_start(&mSound);
   if (result != MA_SUCCESS) {
     LOGE("failed to start sound: err=%d\n", result);
@@ -229,6 +245,10 @@ AudioEngine::Start()
 void
 AudioEngine::Stop()
 {
+  if (!mInited) {
+    LOGE("AudioEngine is not initialized.\n");
+    return;
+  }
   ma_result result = ma_sound_stop(&mSound);
   if (result != MA_SUCCESS) {
     LOGE("failed to stop sound: err=%d\n", result);
@@ -246,8 +266,9 @@ AudioEngine::SetVolume(float vol)
       vol = 1.0f;
     }
     mVolume = vol;
-
-    ma_sound_set_volume(&mSound, vol);
+    if (mInited) {
+      ma_sound_set_volume(&mSound, vol);
+    }
   }
 }
 

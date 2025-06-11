@@ -46,6 +46,7 @@ private:
   ma_sound mSound;
   my_data_source mSource;
   int32_t mFrameSize;
+  bool mInited;
 
   AudioCallback mAudioCallback;
   void* mUserData;

@@ -17,13 +17,17 @@ MoviePlayerCore::MoviePlayerCore(PixelFormat pixelFormat, bool useAudioEngine)
 : mState(STATE_UNINIT)
 , mPixelFormat(pixelFormat)
 #ifdef INNER_AUDIOENGINE
-, mUseAudioEngine(useAudioEngine)
 , mAudioEngine(nullptr)
 #endif
 , mOnStateFunc(nullptr)
 , mOnAudioDecodedFunc(nullptr)
 , mOnVideoDecodedFunc(nullptr)
 {
+#ifdef INNER_AUDIOENGINE
+  if (useAudioEngine) {
+    mAudioEngine = new AudioEngine();
+  }
+#endif
   Init();
 }
 
@@ -93,7 +97,7 @@ MoviePlayerCore::Done()
   StopThread();
 
 #ifdef INNER_AUDIOENGINE
-  if (mUseAudioEngine && mAudioEngine) {
+  if (mAudioEngine) {
     mAudioEngine->Done();
     delete mAudioEngine;
     mAudioEngine = nullptr;
@@ -408,13 +412,8 @@ MoviePlayerCore::SelectTargetTrack()
       }
 
 #ifdef INNER_AUDIOENGINE
-      // 自前オーディオ再生の場合はAudioEngineを作成する
-      if (mUseAudioEngine) {
-        if (mAudioEngine != nullptr) {
-          mAudioEngine->Stop();
-          delete mAudioEngine;
-        }
-        mAudioEngine = new AudioEngine();
+      // 自前オーディオ再生の場合はAudioEngineを初期化する
+      if (mAudioEngine != nullptr) {
         mAudioEngine->Init(AudioDataCallback, this, audioFormat, info.a.channels, info.a.sampleRate);
       }
 #endif
@@ -1221,7 +1220,7 @@ void
 MoviePlayerCore::SetVolume(float volume)
 {
 #ifdef INNER_AUDIOENGINE
-  if (IsAudioAvailable() && mUseAudioEngine) {
+  if (mAudioEngine) {
     mAudioEngine->SetVolume(volume);
   }
 #endif
@@ -1232,7 +1231,7 @@ MoviePlayerCore::Volume() const
 {
   float volume = 1.0f;
 #ifdef INNER_AUDIOENGINE
-  if (IsAudioAvailable() && mUseAudioEngine) {
+  if (mAudioEngine) {
     volume = mAudioEngine->Volume();
   }
 #endif
