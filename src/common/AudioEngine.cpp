@@ -205,7 +205,8 @@ AudioEngine::Init(AudioCallback callback, void* userData, AudioFormat format, in
   }
 
   // 初期ボリューム取得
-  mVolume = ma_sound_get_volume(&mSound);
+  mVolume = 0;
+  ma_sound_set_volume(&mSound, 0);
   // LOGV("initial sound volume: %f\n", mVolume);
 
   // LOGV("miniaudio engine initialized!\n");
@@ -290,7 +291,7 @@ AudioEngine::ReadData(void *pFramesOut, ma_uint64 frameCount, ma_uint64 *pFrames
                             (uint64_t *)&framesRead);
   }
 
-#if 0
+#if 1
   // BUSYで止めずにゼロフィルした音声を送る場合
   if (!updated) {
     memset(pFramesOut, 0, bytesToRead);
