@@ -3,8 +3,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <sys/types.h>
-
-
 class IMovieReadStream {
 public:
     virtual int AddRef(void) = 0;
@@ -180,25 +178,6 @@ public:
   virtual int64_t Position() const = 0;
   virtual bool IsPlaying() const   = 0;
   virtual bool Loop() const        = 0;
-
-  // 出力ビデオフレームを指定したバッファへコピー取得する
-  // RGB系カラーフォマットしか想定されていないので、InitParam::videoColorFormatで
-  // RGB系フォーマットが指定されていない場合は常に失敗する
-  virtual bool GetVideoFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes,
-                             uint64_t *timeStampUs = nullptr) = 0;
-
-  // 出力ビデオフレームをプレイヤーの内部バッファを参照する形で取得する
-  // デコーダのYUV出力を無変換で取得したい場合などに使用する
-  // フレームの詳細なパラメータはVideoFrame構造体のメンバに含まれ
-  // フレームデータ自体は、次回GetVideoFrame()がtrueを返す(==更新が発生する)まで有効
-  // フレームデータに更新がない場合はfalseを返す
-  virtual bool GetVideoFrame(VideoFrame *frame, uint64_t *timeStampUs = nullptr) = 0;
-
-  // 出力オーディオ列を取得する。要求量のデコード出力が溜まっていない場合はfalseを返す。
-  // InitParam::useOwnAudioEngineがtrueの場合は、内部AudioEngine側にデータが
-  // 吸い上げられている状態で、外部には回せないようになっているので常にfalseを返す
-  virtual bool GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
-                             uint64_t *timeStampUs = nullptr) = 0;
 
   // ビデオデコーダコールバック
   typedef void (*OnVideoDecoded)(void *userPtr, VideoFrame *frame);

@@ -8,6 +8,7 @@
 #include <functional>
 
 class AudioEngine;
+class IMovieReadStream;
 
 class MoviePlayerCore : public MessageLooper
 {

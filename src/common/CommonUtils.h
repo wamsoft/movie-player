@@ -63,7 +63,7 @@ simple_time_resolution_test()
 
   auto a = high_resolution_clock::now();
   auto b = high_resolution_clock::now();
-  printf("%" PRId64 " ns\n", duration_cast<nanoseconds>(b - a).count());
+  //printf("%" PRId64 " ns\n", duration_cast<nanoseconds>(b - a).count());
 }
 
 static int64_t
@@ -119,7 +119,7 @@ public:
     if (isActive) {
       high_resolution_clock::time_point end = high_resolution_clock::now();
       microseconds elapsed                  = duration_cast<microseconds>(end - begin);
-      LOGV("PERF: %s: %" PRId64 "[us]\n", label.c_str(), elapsed.count());
+      //LOGV("PERF: %s: %" PRId64 "[us]\n", label.c_str(), elapsed.count());
 
       isActive = false;
     }

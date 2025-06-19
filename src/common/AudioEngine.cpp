@@ -205,9 +205,9 @@ AudioEngine::Init(AudioCallback callback, void* userData, AudioFormat format, in
   }
 
   // 初期ボリューム取得
-  mVolume = 0;
-  ma_sound_set_volume(&mSound, 0);
-  // LOGV("initial sound volume: %f\n", mVolume);
+  mVolume = 1.0;
+  ma_sound_set_volume(&mSound, mVolume);
+  LOGV("initial sound volume: %f\n", mVolume);
 
   // LOGV("miniaudio engine initialized!\n");
 

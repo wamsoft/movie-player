@@ -1,7 +1,9 @@
 #define MYLOG_TAG "MoviePlayerCore"
 #include "BasicLog.h"
 #include "MoviePlayerCore.h"
+
 #include "AudioEngine.h"
+#include "IMoviePlayer.h"
 
 // 静的コールバック関数を追加
 static bool AudioDataCallback(void* userData, uint8_t* buffer, uint64_t frameCount, uint64_t* framesRead)

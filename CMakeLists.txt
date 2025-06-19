@@ -1,20 +1,7 @@
-cmake_minimum_required(VERSION 3.10.2)
+cmake_minimum_required(VERSION 3.16.0)
 
 if(UNIX AND NOT APPLE)
     set(LINUX TRUE)
-endif()
-
-# ------------------------------------------------------------------------------
-# vcpkg環境
-# ------------------------------------------------------------------------------
-if(WIN32 OR LINUX)
-
-# vcpkg対応
-if(DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
-set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
-	CACHE STRING "")
-endif()
-
 endif()
 
 # ------------------------------------------------------------------------------
@@ -98,9 +85,6 @@ PRIVATE
 	src/windows
 	extlibs/nestegg/include
 	extlibs/libyuv/include
-	)
-
-target_include_directories(${PROJ_NAME} PRIVATE
 	src/common
 	src/windows
 	)
@@ -139,17 +123,15 @@ target_link_libraries(${PROJ_NAME} PUBLIC Opus::opus)
 find_path(MINIAUDIO_INCLUDE_DIRS "miniaudio.h")
 target_include_directories(${PROJ_NAME} PRIVATE ${MINIAUDIO_INCLUDE_DIRS})
 
-endif()
-
 # ------------------------------------------------------------------------------
 # nestegg版対応アーキテクチャ個別：Linux
 # ------------------------------------------------------------------------------
 if(LINUX)
-
 # pthread のリンクエラーを解消する
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(${PROJ_NAME} PUBLIC ${CMAKE_THREAD_LIBS_INIT})
+endif()
 
 endif()
 
@@ -168,21 +150,33 @@ add_library(${PROJ_NAME} STATIC
 	src/android/MoviePlayer.cpp
 	)
 
+target_compile_definitions(${PROJ_NAME} PUBLIC
+	INNER_AUDIOENGINE=1
+)
+
+#  miniaudio
+find_path(MINIAUDIO_INCLUDE_DIRS "miniaudio.h")
+target_include_directories(${PROJ_NAME} PRIVATE ${MINIAUDIO_INCLUDE_DIRS})
+
+if(MOVIEPLAYER_EXTERNAL_MINIAUDIO)
+target_compile_definitions(${PROJ_NAME} PUBLIC
+	EXTERNAL_MINIAUDIO=1
+)
+endif()
+
+
 target_include_directories(${PROJ_NAME} 
 PUBLIC 
 	include
 PRIVATE
 	src/android
 	extlibs/libyuv/include
-)
-
-target_include_directories(${PROJ_NAME} PRIVATE
 	src/common
 	)
 
 find_library(log-lib log)
 
-target_link_libraries(${PROJ_NAME}
+target_link_libraries(${PROJ_NAME} PUBLIC
 	${log-lib}
 	android
 	mediandk
