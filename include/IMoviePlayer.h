@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <sys/types.h>
+#include <functional>
 class IMovieReadStream {
 public:
     virtual int AddRef(void) = 0;
@@ -109,30 +110,6 @@ public:
     STATE_FINISH, // 再生終了した
   };
 
-  // ビデオフレーム
-  // *dataの内容は、次のGetVideoFrame()呼び出しでtrueが返る
-  // (VideoFrameが更新される)まで有効なので、必要なら適宜コピー保持すること
-  struct VideoFrame
-  {
-    ColorFormat colorFormat;
-
-    // カラースペース、カラーレンジはYUVフォーマット時のみ有効
-    // InitParam::videoColorFormatでRGB変換を指定している場合は
-    // 変換前のYUV状態でのcs/crが格納されている
-    ColorSpace colorSpace;
-    ColorRange colorRange;
-
-    int32_t width;
-    int32_t height;
-    int32_t displayWidth;
-    int32_t displayHeight;
-
-    size_t dataSize;
-    uint8_t *data;
-    uint8_t *planes[VIDEO_PLANE_COUNT]; // *data 内の各プレーン先頭ポインタ
-    int32_t stride[VIDEO_PLANE_COUNT];  // 各プレーンのストライド
-  };
-
   // 生成パラメータ
   struct InitParam
   {
@@ -180,13 +157,13 @@ public:
   virtual bool Loop() const        = 0;
 
   // ビデオデコーダコールバック
-  typedef void (*OnVideoDecoded)(void *userPtr, VideoFrame *frame);
+  typedef std::function<void(char *dest, int pitch)> DestUpdater;
+  typedef std::function<void(int w, int h, DestUpdater updater)> OnVideoDecoded;
+  virtual void SetOnVideoDecoded(OnVideoDecoded callback) = 0;
 
-  virtual void SetOnVideoDecoded(OnVideoDecoded func, void *userPtr) = 0;
-
+  // XXX Video にあわせたいれかえ検討
   // オーディオデコーダコールバック
   typedef int32_t (*OnAudioDecoded)(void *userPtr, const uint8_t *data, size_t sizeBytes);
-
   // 出力オーディオ通知関数を取得する
   // InitParam::useOwnAudioEngineがtrueの場合は、内部AudioEngine側にデータが
   // 吸い上げられている状態で、外部には回せないようになっているので呼ばれない

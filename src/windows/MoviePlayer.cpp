@@ -318,113 +318,6 @@ MoviePlayer::Loop() const
 }
 
 bool
-MoviePlayer::GetVideoFrameCommon(const DecodedBuffer **dcBuf)
-{
-  if (!mPlayer) {
-    LOGE("MoviePlayer: internal player is not running.\n");
-    return false;
-  }
-
-  if (!IsPlaying()) {
-    LOGE("MoviePlayer: video is not playing now.\n");
-    return false;
-  }
-
-  bool updated = mPlayer->GetVideoFrame(dcBuf);
-  if (updated) {
-    // 更新されている場合の不正バッファチェック
-    if (*dcBuf == nullptr) {
-      LOGE("invalid decoded frame.\n");
-      return false;
-    }
-
-    if ((*dcBuf)->frame < 0) {
-      // 無効フレーム
-      LOGE("invalid frame number.\n");
-      return false;
-    }
-
-    // DEBUG
-    // LOGV("decoded buffer frame: %" PRId64 " size:%zu\n", dcBuf->frame,
-    // dcBuf->dataSize);
-  }
-
-  return updated;
-}
-
-bool
-MoviePlayer::GetVideoFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes,
-                           uint64_t *timeStampUs)
-{
-  if (!is_rgb_pixel_format(mPlayer->OutputPixelFormat())) {
-    LOGE("Video frame format is not a RGB-like color format.\n");
-    return false;
-  }
-
-  if (dst == nullptr) {
-    LOGE("MoviePlayer: invalid destination buffer.\n");
-    return false;
-  }
-
-  const DecodedBuffer *dcBuf = nullptr;
-  bool updated               = GetVideoFrameCommon(&dcBuf);
-  if (updated) {
-    if (strideBytes == w * 4) {
-      memcpy(dst, dcBuf->data, dcBuf->dataSize);
-    } else {
-      uint8_t *d = dst;
-      uint8_t *s = dcBuf->data;
-      int spitch = w * 4;
-      for (int y = 0; y < h; y++) {
-        memcpy(d, s, spitch);
-        s += spitch;
-        d += strideBytes;
-      }
-    }
-    if (timeStampUs) {
-      *timeStampUs = ns_to_us(dcBuf->timeStampNs);
-    }
-  }
-
-  return updated;
-}
-
-bool
-MoviePlayer::GetVideoFrame(VideoFrame *frame, uint64_t *timeStampUs)
-{
-  if (frame == nullptr) {
-    LOGE("MoviePlayer: invalid destination buffer.\n");
-    return false;
-  }
-
-  const DecodedBuffer *dcBuf = nullptr;
-  bool updated               = GetVideoFrameCommon(&dcBuf);
-  if (updated) {
-    frame->colorFormat = conv_pixel_format(mPlayer->OutputPixelFormat());
-    frame->colorSpace  = (IMoviePlayer::ColorSpace)dcBuf->v.colorSpace;
-    frame->colorRange  = (IMoviePlayer::ColorRange)dcBuf->v.colorRange;
-
-    frame->width         = dcBuf->v.width;
-    frame->height        = dcBuf->v.height;
-    frame->displayWidth  = dcBuf->v.displayWidth;
-    frame->displayHeight = dcBuf->v.displayHeight;
-
-    frame->data     = dcBuf->data;
-    frame->dataSize = dcBuf->dataSize;
-    for (int planeIdx = 0; planeIdx < VIDEO_PLANE_COUNT; planeIdx++) {
-      frame->planes[planeIdx] = dcBuf->v.planes[planeIdx];
-      frame->stride[planeIdx] = dcBuf->v.stride[planeIdx];
-    }
-
-    if (timeStampUs) {
-      *timeStampUs = ns_to_us(dcBuf->timeStampNs);
-    }
-  }
-
-  return updated;
-}
-
-bool
 MoviePlayer::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
                            uint64_t *timeStampUs)
 {
@@ -457,31 +350,32 @@ MoviePlayer::SetOnState(OnState func, void *userPtr)
   });
 }
 
-
 void 
-MoviePlayer::SetOnVideoDecoded(OnVideoDecoded func, void *userPtr)
+MoviePlayer::SetOnVideoDecoded(OnVideoDecoded callback)
 {
   if (!mPlayer) {
     LOGE("MoviePlayer: internal player is not running.\n");
   }
-  auto format = conv_pixel_format(mPlayer->OutputPixelFormat());
-  mPlayer->SetOnVideoDecoded([func, userPtr, format](const DecodedBuffer *data) {
-    // 情報つめなおし
-    VideoFrame frame;
-    frame.colorFormat = format;
-    frame.colorSpace  = (IMoviePlayer::ColorSpace)data->v.colorSpace;
-    frame.colorRange  = (IMoviePlayer::ColorRange)data->v.colorRange;
-    frame.width         = data->v.width;
-    frame.height        = data->v.height;
-    frame.displayWidth  = data->v.displayWidth;
-    frame.displayHeight = data->v.displayHeight;
-    frame.data          = data->data;
-    frame.dataSize      = data->dataSize;
-    for (int planeIdx = 0; planeIdx < VIDEO_PLANE_COUNT; planeIdx++) {
-      frame.planes[planeIdx] = data->v.planes[planeIdx];
-      frame.stride[planeIdx] = data->v.stride[planeIdx];
-    }
-    func(userPtr, &frame);
+  mPlayer->SetOnVideoDecoded([callback](const DecodedBuffer *data) {
+
+    // 現状はARGBフォーマット固定
+    int w = data->v.width;
+    int h = data->v.height;
+    int spitch = w * 4; // ARGBのストライド
+    char *src = (char*)data->data;
+    callback(w, h, [w, h, spitch, src](char *dest, int dpitch) {
+      if (dpitch == spitch && dpitch > 0) {
+        memcpy(dest, src, spitch * h);
+      } else {
+        char *d = dest;
+        char *s = src;
+        for (int y = 0; y < h; y++) {
+          memcpy(d, s, spitch);
+          s += spitch;
+          d += dpitch;
+        }
+      }
+    });
   });
 }
 

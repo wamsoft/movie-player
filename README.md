@@ -38,16 +38,13 @@ Android 版については broken な状態です。
 
 ## 最近の大きな変更
 
-- `IMoviePlayer::RenderFrame()` を廃止して `IMoviePlayer::GetVideoFrame()` に
-  変更になっています。
-- `IMoviePlayer::GetVideoFrame()` は旧来の `RenderFrame()` 風に、用意したバッファへ
-  詰めて返す形式のものと、`VideoFrame*`の形でデコーダ出力の内部バッファを
-  返す形式のものの 2 通り用意してあります。
-  - 前者は `InitParam::videoColorFormat` に RGB 系フォーマットを指定した場合のみ
-    有効です。
-  - 後者は逆に、`COLOR_NOCONV` 場合に有効です。デコーダの YUV 出力を
-    そのまま取得するので、これをシェーダで直接 YUV テクスチャとして
-    描画することにより YUV>RGB 変換の CPU 負荷を回避することが可能です。
+- 動画取得処理は OnVideoDecoded の形に再修正
+- 生成時に指定したビデオフォーマットでのビットマップを書き戻しの形
+- ※ YUVテクスチャ処理が対応できてない。現在 ARBG 以外だと動作不良
+- GetVideoFrame() 系メソッドは廃止
+- 音声データも同様にできるように修正予定だが現状はまだ（音声は別スレッドから吸い上げる可能性が高い）
+- テストコードがあわせた修正ができてないので要対応
+
 - Video/Audio の情報取得が個別メソッドから `IMoviePlayer::GetVideoFormat()`、
   `IMoviePlayer::GetAudioFormat()` に集約されています。
 

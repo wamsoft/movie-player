@@ -40,24 +40,18 @@ public:
   virtual bool IsPlaying() const override;
   virtual bool Loop() const override;
 
-  // ※IMoviePlayer からは廃止した直接取得関数
-  bool GetVideoFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes,
-                             uint64_t *timeStampUs);
-  bool GetVideoFrame(VideoFrame *frame, uint64_t *timeStampUs);
   bool GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
                              uint64_t *timeStampUs);
 
   virtual void SetOnState(OnState func, void *userPtr);
 
-  virtual void SetOnVideoDecoded(OnVideoDecoded func, void *userPtr);
+  virtual void SetOnVideoDecoded(OnVideoDecoded callback);
 
   virtual void SetOnAudioDecoded(OnAudioDecoded func, void *userPtr);
 
 private:
   void Init();
   void Done();
-
-  bool GetVideoFrameCommon(const class DecodedBuffer **dcBuf);
 
 private:
   class MoviePlayerCore *mPlayer;
