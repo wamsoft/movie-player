@@ -10,6 +10,11 @@ AudioTrackPlayer::AudioTrackPlayer(AMediaExtractor *ex, int32_t trackIndex,
 : TrackPlayer(ex, trackIndex, timer)
 , mOnAudioDecoded(nullptr)
 , mOnAudioDecodedUserPtr(nullptr)
+, mRingBuffer(nullptr)
+, mRingBufferSize(0)
+, mRingBufferWritePos(0)
+, mRingBufferReadPos(0)
+, mRingBufferDataSize(0)
 {
   Init();
 
@@ -52,6 +57,9 @@ AudioTrackPlayer::AudioTrackPlayer(AMediaExtractor *ex, int32_t trackIndex,
   AMediaFormat_getInt32(outFormat, "pcm-encoding", &mEncoding);
 #endif
 
+  // リングバッファを初期化（2秒分）
+  InitRingBuffer();
+
   LOGV("audio duration=%lld, sampleRate=%d, channels=%d, bps=%d\n", mDuration,
        mSampleRate, mChannels, mBitsPerSample);
 }
@@ -73,11 +81,111 @@ AudioTrackPlayer::Init()
 
   mOnAudioDecoded        = nullptr;
   mOnAudioDecodedUserPtr = nullptr;
+
+  mRingBuffer = nullptr;
+  mRingBufferSize = 0;
+  mRingBufferWritePos = 0;
+  mRingBufferReadPos = 0;
+  mRingBufferDataSize = 0;
 }
 
 void
 AudioTrackPlayer::Done()
-{}
+{
+  if (mRingBuffer) {
+    delete[] mRingBuffer;
+    mRingBuffer = nullptr;
+  }
+}
+
+void
+AudioTrackPlayer::InitRingBuffer()
+{
+  if (mSampleRate > 0 && mChannels > 0 && mBitsPerSample > 0) {
+    // 2秒分のバッファサイズを計算
+    int32_t frameSize = (mBitsPerSample / 8) * mChannels;
+    int32_t framesFor2Sec = mSampleRate * 2;
+    mRingBufferSize = framesFor2Sec * frameSize;
+    
+    mRingBuffer = new uint8_t[mRingBufferSize];
+    mRingBufferWritePos = 0;
+    mRingBufferReadPos = 0;
+    mRingBufferDataSize = 0;
+    
+    LOGV("Ring buffer initialized: size=%d bytes (%d frames)\n", mRingBufferSize, framesFor2Sec);
+  }
+}
+
+void
+AudioTrackPlayer::WriteToRingBuffer(uint8_t* data, size_t size)
+{
+  if (!mRingBuffer || size == 0) {
+    return;
+  }
+  
+  std::lock_guard<std::mutex> lock(mRingBufferMutex);
+  
+  size_t bytesToWrite = size;
+  size_t availableSpace = mRingBufferSize - mRingBufferDataSize;
+  
+  if (bytesToWrite > availableSpace) {
+    // バッファが満杯の場合は古いデータを上書き
+    bytesToWrite = availableSpace;
+    LOGV("Ring buffer overflow, truncating data\n");
+  }
+  
+  while (bytesToWrite > 0) {
+    size_t chunkSize = std::min(bytesToWrite, mRingBufferSize - mRingBufferWritePos);
+    memcpy(mRingBuffer + mRingBufferWritePos, data, chunkSize);
+    
+    mRingBufferWritePos = (mRingBufferWritePos + chunkSize) % mRingBufferSize;
+    mRingBufferDataSize += chunkSize;
+    data += chunkSize;
+    bytesToWrite -= chunkSize;
+  }
+}
+
+bool
+AudioTrackPlayer::ReadFromRingBuffer(uint8_t* buffer, uint64_t frameCount, uint64_t* framesRead)
+{
+  if (!mRingBuffer || frameCount == 0) {
+    if (framesRead) *framesRead = 0;
+    return false;
+  }
+  
+  std::lock_guard<std::mutex> lock(mRingBufferMutex);
+  
+  int32_t frameSize = (mBitsPerSample / 8) * mChannels;
+  size_t bytesToRead = frameCount * frameSize;
+  size_t actualBytesToRead = std::min(bytesToRead, mRingBufferDataSize);
+  
+  uint64_t actualFramesToRead = actualBytesToRead / frameSize;
+  size_t actualBytesForFrames = actualFramesToRead * frameSize;
+  
+  if (actualFramesToRead == 0) {
+    if (framesRead) *framesRead = 0;
+    return false;
+  }
+  
+  size_t bytesRead = 0;
+  while (bytesRead < actualBytesForFrames) {
+    size_t chunkSize = std::min(actualBytesForFrames - bytesRead, mRingBufferSize - mRingBufferReadPos);
+    memcpy(buffer + bytesRead, mRingBuffer + mRingBufferReadPos, chunkSize);
+    
+    mRingBufferReadPos = (mRingBufferReadPos + chunkSize) % mRingBufferSize;
+    mRingBufferDataSize -= chunkSize;
+    bytesRead += chunkSize;
+  }
+  
+  // 不足分をゼロで埋める
+  if (actualFramesToRead < frameCount) {
+    size_t remainingBytes = (frameCount - actualFramesToRead) * frameSize;
+    memset(buffer + actualBytesForFrames, 0, remainingBytes);
+  }
+  
+  if (framesRead) *framesRead = actualFramesToRead;
+  return actualFramesToRead > 0;
+}
 
 int32_t
 AudioTrackPlayer::SampleRate() const
@@ -213,6 +321,9 @@ AudioTrackPlayer::HandleOutputData(ssize_t bufIdx, AMediaCodecBufferInfo &bufInf
     // 出力バッファの内容をハンドラに返す
     if (mOnAudioDecoded != nullptr) {
       mOnAudioDecoded(mOnAudioDecodedUserPtr, buf, bufSize);
+    } else {
+      // コールバックが設定されていない場合はリングバッファにデータを格納
+      WriteToRingBuffer(buf, bufInfo.size);
     }
 
 #if 0 // DEBUG

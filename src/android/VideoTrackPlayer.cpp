@@ -4,6 +4,7 @@
 #include "CommonUtils.h"
 #include "Constants.h"
 #include "VideoTrackPlayer.h"
+#include "PixelConvert.h"
 
 // -----------------------------------------------------------------------------
 // カラー関連定数変換処理
@@ -87,57 +88,6 @@ conv_color_range(int32_t nativeColorRange)
 }
 
 // -----------------------------------------------------------------------------
-// デコード済みフレームデータ
-// -----------------------------------------------------------------------------
-void
-DecodedFrame::Init(int32_t w, int32_t h, int32_t s, PixelFormat cf, ColorRange cr,
-                   ColorSpace cs)
-{
-  width       = w;
-  height      = h;
-  stride      = s;
-  colorFormat = cf;
-  colorRange  = cr;
-  colorSpace  = cs;
-
-  bufferId           = -1;
-  sizeBytes          = -1;
-  presentationTimeUs = -1;
-  data               = nullptr;
-}
-
-void
-DecodedFrame::Release(AMediaCodec *codec)
-{
-  if (bufferId >= 0) {
-    AMediaCodec_releaseOutputBuffer(codec, bufferId, false);
-  }
-  bufferId  = -1;
-  data      = nullptr;
-  sizeBytes = 0;
-}
-
-void
-DecodedFrame::SetData(AMediaCodec *codec, ssize_t id, uint8_t *d, size_t size,
-                      int64_t pts)
-{
-  std::lock_guard<std::mutex> lk(dataMutex);
-  if (bufferId >= 0) {
-    AMediaCodec_releaseOutputBuffer(codec, bufferId, false);
-  }
-  bufferId           = id;
-  data               = d;
-  sizeBytes          = size;
-  presentationTimeUs = pts;
-}
-
-bool
-DecodedFrame::IsValid()
-{
-  return (bufferId >= 0 && data != nullptr && sizeBytes > 0);
-}
-
-// -----------------------------------------------------------------------------
 // ビデオトラックプレイヤ
 // -----------------------------------------------------------------------------
 VideoTrackPlayer::VideoTrackPlayer(AMediaExtractor *ex, int32_t trackIndex,
@@ -185,12 +135,6 @@ VideoTrackPlayer::VideoTrackPlayer(AMediaExtractor *ex, int32_t trackIndex,
   LOGV("video w=%d, h=%d, stride=%d, colorFormat=%d, colorRange=%d, colorSpace=%d",
        mOutputWidth, mOutputHeight, mOutputStride, mOutputColorFormat, mOutputColorRange,
        mOutputColorSpace);
-
-  // デコード済みフレーム情報の初期化
-  PixelFormat pf = conv_color_format(mOutputColorFormat);
-  ColorRange cr  = conv_color_range(mOutputColorRange);
-  ColorSpace cs  = conv_color_space(mOutputColorSpace);
-  mDecodedFrame.Init(mOutputWidth, mOutputHeight, mOutputStride, pf, cr, cs);
 }
 
 VideoTrackPlayer::~VideoTrackPlayer()
@@ -210,17 +154,14 @@ VideoTrackPlayer::Init()
   mOutputColorFormat = -1;
   mOutputColorRange  = -1;
   mOutputColorSpace  = -1;
+
+  mOnVideoDecoded = nullptr;
+  mOnVideoFormat = PIXEL_FORMAT_UNKNOWN;
 }
 
 void
 VideoTrackPlayer::Done()
 {}
-
-DecodedFrame *
-VideoTrackPlayer::GetDecodedFrame()
-{
-  return &mDecodedFrame;
-}
 
 int32_t
 VideoTrackPlayer::Width() const
@@ -270,7 +211,6 @@ VideoTrackPlayer::HandleMessage(int32_t what, int64_t arg, void *obj)
     break;
 
   case MSG_SEEK:
-    mDecodedFrame.Release(mCodec);
     AMediaExtractor_seekTo(mExtractor, arg, AMEDIAEXTRACTOR_SEEK_NEXT_SYNC);
     AMediaCodec_flush(mCodec);
     // TODO starttimeをV/A共通にしてるので、同期処理していない現状ではおかしくなるかも？
@@ -285,7 +225,6 @@ VideoTrackPlayer::HandleMessage(int32_t what, int64_t arg, void *obj)
 
   case MSG_STOP:
     SetState(STATE_STOP);
-    mDecodedFrame.Release(mCodec);
     AMediaCodec_stop(mCodec);
     // AMediaCodec_delete(mCodec);
     Post(MSG_NOP, 0, nullptr, true); // 発行済メッセージを全フラッシュ
@@ -306,29 +245,37 @@ VideoTrackPlayer::HandleOutputData(ssize_t bufIdx, AMediaCodecBufferInfo &bufInf
 {
   // 出力バッファの内容をコピーする
   if (bufInfo.size > 0) {
-    size_t bufSize;
-    uint8_t *buf = AMediaCodec_getOutputBuffer(mCodec, bufIdx, &bufSize);
 
     // このフレームのPTSをタイマーに反映
     int64_t mediaTimeUs = bufInfo.presentationTimeUs;
     if (!mClock->IsStarted()) {
-      mClock->SetStartTime(mediaTimeUs);
+      mClock->SetStartMediaTime(mediaTimeUs);
     }
-    mClock->SetCurrentMediaTime(mediaTimeUs);
+    mClock->SetPresentationTime(mediaTimeUs);
 
-    // PTSが未来の場合はRenderedFrameへの反映を待ち合わせる
-    int64_t renderDelay = mClock->CalcDelay(mediaTimeUs);
-    if (renderDelay > 0) {
-      // LOGV("render delay sleep: %lld us \n", renderDelay);
-      std::this_thread::sleep_for(std::chrono::microseconds(renderDelay));
+    if (mOnVideoDecoded == nullptr) {
+      return;
     }
 
-    // レンダリング済みフレームを更新
-    mDecodedFrame.SetData(mCodec, bufIdx, buf, bufSize, mediaTimeUs);
-
-#if 0 // DEBUG
-    LOGV("video output: id: %zu  size: %d  pts: %lld flags: %d", bufidx, info.size,
-         mediaTimeUs, info.flags);
-#endif
+    size_t bufSize;
+    uint8_t *buf = AMediaCodec_getOutputBuffer(mCodec, bufIdx, &bufSize);
+    // YUVのプレーンごとのストライドなどを取得する方法が見当たらないので
+    // ソースプレーンがパディングされずに連続して配置されるものとして扱っている
+    // 一部デバイスや特殊サイズムービーだとうまくいかない可能性あり
+    const uint8_t *yBuf = buf;
+    const uint8_t *uBuf = yBuf + mOutputWidth * mOutputHeight;
+    const uint8_t *vBuf = uBuf + (mOutputWidth * mOutputHeight / 4);
+    int32_t yStride     = mOutputWidth;
+    int32_t uvStride    = mOutputWidth / 2;
+    PixelFormat colorFormat = conv_color_format(mOutputColorFormat);
+    if (is_nv_pixel_format(colorFormat)) {
+      uvStride = mOutputWidth; // NVはUVがパックド
+    }
+    mOnVideoDecoded(mOutputWidth, mOutputHeight, [&](char *dest, int pitch) {
+      convert_yuv_to_rgb32((uint8_t*)dest, pitch, mOnVideoFormat, yBuf, uBuf, vBuf, 0, yStride, uvStride, 0,
+                          mOutputWidth, mOutputHeight, colorFormat, (ColorSpace)mOutputColorSpace,
+                          (ColorRange)mOutputColorRange);
+    });
+    AMediaCodec_releaseOutputBuffer(mCodec, bufIdx, false);
   }
 }

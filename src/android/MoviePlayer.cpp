@@ -66,8 +66,9 @@ conv_color_format(IMoviePlayer::ColorFormat colorFormat)
 // -----------------------------------------------------------------------------
 // MoviePlayer
 // -----------------------------------------------------------------------------
-MoviePlayer::MoviePlayer()
+MoviePlayer::MoviePlayer(InitParam &param)
 : mPlayer(nullptr)
+, mInitParam(param)
 , mAsset(nullptr)
 {
   Init();
@@ -100,16 +101,24 @@ MoviePlayer::Done()
 bool
 MoviePlayer::Open(const char *filepath)
 {
-  mPlayer = new MoviePlayerCore(mInit);
-  mPlayer->SetPixelFormat(conv_color_format(mColorFormat));
+  mPlayer = new MoviePlayerCore(mInitParam.useOwnAudioEngine);
+  mPlayer->SetPixelFormat(conv_color_format(mInitParam.videoColorFormat));
   return mPlayer->Open(filepath);
+}
+
+bool 
+MoviePlayer::Open(IMovieReadStream *stream)
+{
+  mPlayer = new MoviePlayerCore(mInitParam.useOwnAudioEngine);
+  mPlayer->SetPixelFormat(conv_color_format(mInitParam.videoColorFormat));
+  return mPlayer->Open(stream);
 }
 
 bool
 MoviePlayer::Open(int fd, off_t offset, off_t length)
 {
   mPlayer = new MoviePlayerCore();
-  mPlayer->SetPixelFormat(conv_color_format(mColorFormat));
+  mPlayer->SetPixelFormat(conv_color_format(mInitParam.videoColorFormat));
   return mPlayer->Open(fd, offset, length);
 }
 
@@ -170,7 +179,7 @@ MoviePlayer::Resume()
 void
 MoviePlayer::Seek(int64_t posUs)
 {
-  LOGV("seek posUs=%lld", posUs);
+  LOGV("seek posUs=%ld", posUs);
 
   if (mPlayer) {
     return mPlayer->Seek(posUs);
@@ -191,10 +200,8 @@ void
 MoviePlayer::SetColorFormat(ColorFormat format)
 {
   LOGV("set ColorFormat=%d", format);
-
-  IMoviePlayer::SetColorFormat(format);
   if (mPlayer) {
-    mPlayer->SetPixelFormat(conv_color_format(mColorFormat));
+    mPlayer->SetPixelFormat(conv_color_format(mInitParam.videoColorFormat));
   }
 }
 
@@ -298,71 +305,34 @@ MoviePlayer::Loop() const
 }
 
 void
+MoviePlayer::SetOnState(OnState func, void *userPtr)
+{
+  if (mPlayer) {
+//    mPlayer->SetOnState(func, userPtr);
+  }
+}
+
+void
 MoviePlayer::SetOnAudioDecoded(OnAudioDecoded func, void *userPtr)
 {
-  IMoviePlayer::SetOnAudioDecoded(func, userPtr);
   if (mPlayer) {
     mPlayer->SetOnAudioDecoded(func, userPtr);
   }
 }
 
 void
-MoviePlayer::RenderFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes,
-                         ColorFormat format)
+MoviePlayer::SetOnVideoDecoded(OnVideoDecoded func)
 {
-  if (!mPlayer) {
-    LOGE("internal player is not running.");
-    return;
+  if (mPlayer) {
+    mPlayer->SetOnVideoDecoded(func);
   }
-
-  if (!IsPlaying()) {
-    LOGV("internal player is not playing now.");
-    return;
-  }
-
-  PixelFormat internalFormat = PIXEL_FORMAT_UNKNOWN;
-  switch (format) {
-  case COLOR_UNKNOWN:
-    // UNKNOWNはMoviePlayer::SetColorFormat()で有効なカラーをデフォルトとして
-    // 設定している場合のみ有効な指定。
-    if (mColorFormat == MoviePlayer::COLOR_UNKNOWN) {
-      ASSERT(
-        false,
-        "if you specify MoviePlayer::COLOR_UNKNOWN color format for MoviePlayer::RenderFrame(),"
-        " you MUST set default color format with MoviePlayer::SetColorFormat().\n");
-      return;
-    }
-    break;
-  case COLOR_ABGR:
-    internalFormat = PIXEL_FORMAT_ABGR;
-    break;
-  case COLOR_ARGB:
-    internalFormat = PIXEL_FORMAT_ARGB;
-    break;
-  case COLOR_RGBA:
-    internalFormat = PIXEL_FORMAT_RGBA;
-    break;
-  case COLOR_BGRA:
-    internalFormat = PIXEL_FORMAT_BGRA;
-    break;
-  case COLOR_I420:
-  case COLOR_NV12:
-  case COLOR_NV21:
-    ASSERT(false, "yuv format not supported for MoviePlayer::RenderFrame().\n");
-    break;
-  default:
-    ASSERT(false, "unknown color format: %d\n", format);
-    break;
-  }
-
-  mPlayer->RenderFrame(dst, w, h, strideBytes, internalFormat);
 }
 
 IMoviePlayer *
 IMoviePlayer::CreateMoviePlayer(const char *filename, InitParam &param)
 {
   MoviePlayer *player = new MoviePlayer(param);
-  player->SetColorFormat(format);
+  player->SetColorFormat(param.videoColorFormat);
   if (player->Open(filename)) {
     return player;
   }

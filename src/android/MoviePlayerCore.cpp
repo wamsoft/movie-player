@@ -7,7 +7,9 @@
 #include "VideoTrackPlayer.h"
 #include "AudioTrackPlayer.h"
 #include "MoviePlayerCore.h"
-#include "PixelConvert.h"
+
+#include "AudioEngine.h"
+#include "IMoviePlayer.h"
 
 #include <unistd.h>
 
@@ -21,14 +23,17 @@
 // -----------------------------------------------------------------------------
 // MoviePlayerCore
 // -----------------------------------------------------------------------------
-MoviePlayerCore::MoviePlayerCore()
+MoviePlayerCore::MoviePlayerCore(bool useAudioEngine)
 : mVideoTrackPlayer(nullptr)
 , mAudioTrackPlayer(nullptr)
 , mFd(-1)
 , mIsLoop(false)
-, mOnAudioDecoded(nullptr)
-, mOnAudioDecodedUserPtr(nullptr)
 {
+#ifdef INNER_AUDIOENGINE
+  if (useAudioEngine) {
+    mAudioEngine = new AudioEngine();
+  }
+#endif
   Init();
 }
 
@@ -43,14 +48,19 @@ MoviePlayerCore::Init()
   mIsLoop = false;
 
   mPixelFormat = PIXEL_FORMAT_UNKNOWN;
-
-  mOnAudioDecoded        = nullptr;
-  mOnAudioDecodedUserPtr = nullptr;
 }
 
 void
 MoviePlayerCore::Done()
 {
+#ifdef INNER_AUDIOENGINE
+  if (mAudioEngine) {
+    mAudioEngine->Done();
+    delete mAudioEngine;
+    mAudioEngine = nullptr;
+  }
+#endif
+
   if (mAudioTrackPlayer != nullptr) {
     mAudioTrackPlayer->Stop();
     delete mAudioTrackPlayer;
@@ -96,6 +106,22 @@ MoviePlayerCore::Open(const char *filepath)
   return false;
 }
 
+bool 
+MoviePlayerCore::Open(IMovieReadStream *stream)
+{
+  if (stream) {
+    AMediaExtractor *vEx = CreateExtractor(stream);
+    AMediaExtractor *aEx = CreateExtractor(stream);
+    bool isVideoFound    = vEx && SetupVideoTrackPlayer(vEx);
+    bool isAudioFound    = aEx && SetupAudioTrackPlayer(aEx);
+    if (isVideoFound || isAudioFound) {
+      Start();
+      return true;
+    }
+  }
+  return false;
+}
+
 bool
 MoviePlayerCore::Open(int fd, off_t offset, off_t length)
 {
@@ -124,6 +150,58 @@ MoviePlayerCore::CreateExtractor(const char *filepath)
     return nullptr;
   }
   return ex;
+}
+
+static AMediaDataSource* CreateDataSource(IMovieReadStream* stream) {
+  if (!stream) {
+    return nullptr;
+  }
+  AMediaDataSource* dataSource = AMediaDataSource_new();
+  if (!dataSource) {
+    LOGE("Failed to create AMediaDataSource");
+    return nullptr;
+  }
+  stream->AddRef(); // Ensure the stream is kept alive while used by AMediaDataSource
+  AMediaDataSource_setUserdata(dataSource, (void*)stream);
+  AMediaDataSource_setReadAt(dataSource, [](void* userdata, off64_t offset, void* buffer, size_t size) -> ssize_t {
+    IMovieReadStream* stream = static_cast<IMovieReadStream*>(userdata);
+    if (stream) {
+      stream->Seek(offset, SEEK_SET);
+      size_t bytesRead = stream->Read(buffer, size);
+      return bytesRead > 0 ? bytesRead : -1;
+    }
+    return -1;
+  });
+  AMediaDataSource_setClose(dataSource, [](void* userdata) {
+    IMovieReadStream* stream = static_cast<IMovieReadStream*>(userdata);
+    if (stream) {
+      stream->Release();
+    }
+  });
+  AMediaDataSource_setGetSize(dataSource, [](void* userdata) -> ssize_t {
+    IMovieReadStream* stream = static_cast<IMovieReadStream*>(userdata);
+    return stream ? stream->Size() : 0;
+  });
+  return dataSource;
+}
+
+AMediaExtractor *
+MoviePlayerCore::CreateExtractor(IMovieReadStream *stream)
+{
+  if (stream) {
+    AMediaExtractor *ex = AMediaExtractor_new();
+    AMediaDataSource *dataSource = CreateDataSource(stream);
+    media_status_t err  = AMediaExtractor_setDataSourceCustom(ex, dataSource);
+    if (err != AMEDIA_OK) {
+      LOGE("setDataSource error: %d", err);
+      AMediaExtractor_delete(ex);
+      AMediaDataSource_close(dataSource); // 失敗時にデータソースを開放
+      AMediaDataSource_delete(dataSource); // メモリ解放
+      return nullptr;
+    }
+    return ex;
+  }
+  return nullptr;
 }
 
 AMediaExtractor *
@@ -167,6 +245,16 @@ MoviePlayerCore::SetupVideoTrackPlayer(AMediaExtractor *ex)
 }
 
 bool
+MoviePlayerCore::ReadAudioData(uint8_t* buffer, uint64_t frameCount, uint64_t* framesRead)
+{
+  if (mAudioTrackPlayer) {
+    return mAudioTrackPlayer->ReadFromRingBuffer(buffer, frameCount, framesRead);
+  }
+  return false;
+}
+
+
+bool
 MoviePlayerCore::SetupAudioTrackPlayer(AMediaExtractor *ex)
 {
   // 初めて見つけたオーディオトラックのみを対象にする
@@ -183,11 +271,21 @@ MoviePlayerCore::SetupAudioTrackPlayer(AMediaExtractor *ex)
     } else if (!strncmp(mime, "audio/", 6)) {
       mAudioTrackPlayer = new AudioTrackPlayer(ex, i, &mClock);
       AMediaFormat_delete(format);
-      // 流れ的にはOpen()した後にオーディオフォーマットを確認してからなので
-      // まだ未設定のはずだが一応ハンドラ設定を確認
-      if (mOnAudioDecoded != nullptr) {
-        mAudioTrackPlayer->SetOnAudioDecoded(mOnAudioDecoded, mOnAudioDecodedUserPtr);
+
+#ifdef INNER_AUDIOENGINE
+      // 自前オーディオ再生の場合はAudioEngineを初期化する
+      if (mAudioEngine != nullptr) {
+        // XXX でコードされてるので通常これ？
+        AudioFormat audioFormat = AUDIO_FORMAT_S16;
+        mAudioEngine->Init([](void *userData, uint8_t *buffer, uint64_t frameCount, uint64_t *framesRead) {
+            MoviePlayerCore* player = static_cast<MoviePlayerCore*>(userData);
+            if (player) {
+              return player->ReadAudioData(buffer, frameCount, framesRead);
+            }
+            return false;
+        }, this, audioFormat, mAudioTrackPlayer->Channels(), mAudioTrackPlayer->SampleRate());
       }
+#endif
 
       return true;
     } else {
@@ -383,7 +481,7 @@ MoviePlayerCore::Duration() const
 int64_t
 MoviePlayerCore::Position() const
 {
-  return mClock.GetCurrentMediaTime();
+  return mClock.GetPresentationTime();
 }
 
 bool
@@ -400,60 +498,3 @@ MoviePlayerCore::Loop() const
   return mIsLoop;
 }
 
-void
-MoviePlayerCore::SetOnAudioDecoded(OnAudioDecoded func, void *userPtr)
-{
-  mOnAudioDecoded        = func;
-  mOnAudioDecodedUserPtr = userPtr;
-  if (mAudioTrackPlayer) {
-    mAudioTrackPlayer->SetOnAudioDecoded(func, userPtr);
-  }
-}
-
-void
-MoviePlayerCore::RenderFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes,
-                             PixelFormat format)
-{
-  if (dst == nullptr) {
-    LOGE("invalid destination buffer.");
-    return;
-  }
-
-  if (!mVideoTrackPlayer) {
-    LOGE("video track player is not running.");
-    return;
-  }
-
-  if (!mVideoTrackPlayer->IsPlaying()) {
-    LOGV("video track is not playing.");
-    return;
-  }
-
-  // TODO 固定フォーマット指定対応
-
-  // 現状ではAndroid版では毎回yuv>rgb変換を行っていて、
-  // RenderFrame()で渡されたstrideをそのままlibyuvに通せる
-  // libyuv側で逆stride処理に対応しているのでテンポラリバッファ等使わずそのまま通す
-  DecodedFrame *frame = mVideoTrackPlayer->GetDecodedFrame();
-  if (frame) {
-    std::lock_guard<std::mutex> lock(frame->dataMutex);
-    if (frame->IsValid()) {
-
-      // TODO
-      // YUVのプレーンごとのストライドなどを取得する方法が見当たらないので
-      // ソースプレーンがパディングされずに連続して配置されるものとして扱っている
-      // 一部デバイスや特殊サイズムービーだとうまくいかない可能性はある
-      const uint8_t *yBuf = frame->data;
-      const uint8_t *uBuf = yBuf + frame->width * frame->height;
-      const uint8_t *vBuf = uBuf + (frame->width * frame->height / 4);
-      int32_t yStride     = frame->width;
-      int32_t uvStride    = frame->width / 2;
-      if (is_nv_pixel_format(frame->colorFormat)) {
-        uvStride = frame->width; // NVはUVがパックド
-      }
-      convert_yuv_to_rgb32(dst, strideBytes, format, yBuf, uBuf, vBuf, 0, yStride, uvStride, 0,
-                           w, h, frame->colorFormat, frame->colorSpace,
-                           frame->colorRange);
-    }
-  }
-}

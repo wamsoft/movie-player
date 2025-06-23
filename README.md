@@ -9,13 +9,9 @@ WebM 以外の各種動画フォーマットにも対応します。
 
 細かい事項については各アーキテクチャごとに後ろの方に別項があるので参照してください。
 
-現状のコードは音声対応に際して Windows 版のみ対応作業が完了しており、
-Android 版については broken な状態です。
-
 - Android
   - NDK の MediaExtractor+MediaCodec で対応
   - ビデオのみ動作。オーディオ非対応
-  - **音声対応作業に際して、一旦対応を放置しているためビルドできない状態**
 - Windows
   - nestegg + libvpx で cpu でのデコードで対応
   - miniaudio を内蔵して音声対応
@@ -31,8 +27,6 @@ Android 版については broken な状態です。
 
 - Windows
   - pause/resume したときに、復帰後の数フレームがフレームスキップ扱いになる
-- Android
-  - 音声対応版で行った変更に未対応なためビルドできない状態
 - Linux
   - 確認した WSL 環境では movie_player_test での描画が正しく行われない
 
@@ -50,10 +44,7 @@ Android 版については broken な状態です。
 
 ## 音声対応
 
-Windows 版ビルドでのみ、miniaudio で対応済みです。
-
-一応アプリ側にオーディオエンジンを持つ形にも対応できるようにはしてありますが
-テストコードを用意できていないので実際の動作については未確認です。
+miniaudio での対応になります（AudioEngine.cpp）
 
 # ディレクトリ構造
 
@@ -72,18 +63,21 @@ Windows 版ビルドでのみ、miniaudio で対応済みです。
 
 ## 共通構造
 
-`include/MoviePlayer.h` に `IMoviePlayer` を定義してあります。
+`include/IMoviePlayer.h` に `IMoviePlayer` を定義してあります。
 これを継承して各アーキテクチャ用の `MoviePlayer.h`に
 実装クラスの定義を配置してあります。
 
 ### 利用方法
 
 `IMoviePlayer::CreateMovePlayer(const char *filename, InitParam &param)`
+`IMoviePlayer::CreateMoviePlayer(IMovieReadStream *stream, InitParam &param)`
 
 で、`IMoviePlayer`のインスタンスを作成して使用します。
 `param.videoColorFormat` に出力したいカラーフォーマットを指定してください。
 
-※現時点ではアーカイブ中のファイルの再生は未対応です。
+それぞれ生成した後に、
+`SetOnState`, `SetOnVideoDecoded` で、ステート取得およびビデオ描画
+データ取得用のメソッドを登録してから `Play` で再生開始します。
 
 ## Windows 対応について
 
@@ -132,7 +126,7 @@ vcpkg + cmake の環境を想定しています。
 - libopus / vcpkg / Windows 版のみ
 - libyuv / 自前(`extlibs/`のもの)
 - nestegg / 自前(`extlibs/`のもの) / Windows 版のみ
-- miniaudio / 自前(`extlibs/`のもの)
+- miniaudio / vcpkg
 
 なるべく vcpkg で揃える方針で作業しています。
 libyuv については、他アーキテクチャの対応もありどのみち自前で抱えているので、
@@ -226,8 +220,6 @@ Windows 版は、実態としては Windows に依存するコードは含まな
 
 ## Android 対応について
 
-**注意：現状ビルド不可能な状態です**
-
 NDK の MediaExtractor + MediaCodec を使用してフル C++で組んであります。
 
 デコーダは内部で std::thread を使用してスレッド化してあります。
@@ -235,17 +227,19 @@ MoviewPlayer のインスタンスごとにスレッドが生まれる感じに�
 
 ### 要求 API バージョン
 
-基本機能として API 21 (Lollipop / Android 5.0) 以上を要求します。
-
-テストプログラムでは、バイナリ列入力で API28 を要求する関係上
-`test/android/app/build.gradle` の minSdk は 28 になっていますが、
-現状ではバイナリ列入力は動作しないため(詳細は後の記述参考)
-実際の利用ケースでは 21 で問題ないはずです。
+AMediaDataSource を扱う関係で API 28 (Android 9.0) 以上を要求します。
 
 ### ライブラリのビルド方法
 
 vcpkg + cmake の環境を想定しています。
 ルートの CMakeLists.txt を使用してビルドしてください
+
+```bash
+# windows用
+cmake --preset x64-windows
+# android 用
+cmake --preset arm64-android
+```
 
 ### テストプログラム
 
@@ -258,23 +252,3 @@ MediaCodec の出力は YUV なので RGB への間関に libyuv を導入して
 テストコードはエミュレータ(Pixel3)でのみ確認していますが
 実機だとなにか想定外のフォーマットで出力されてくる可能性があります。
 
-### 問題点
-
-バイト列を入力とするインタフェースがうまく動作しない(API がエラーを返す)。
-
-またこの機能自体、WEB や github にも全然利用情報がなく、唯一見つかったのが
-自分と同じ状況のエラーになりますという stackoverflow の投稿で、
-しかもまったくリプライが付いていないという状態です。
-[これ](https://stackoverflow.com/questions/60932644/using-a-custom-amediadatasource-with-ndkmediacodec)
-
-そもそもの機能実装のためには API28(Android OS Pie)以上を要求されることもあり
-fd(ファイルディスクリプタ)を渡して動画を開く方法でなんとかする方向で
-利用してもらえればと思います。
-
-どうしてもバイト列を入力として与えるインタフェースが必要な場合は
-MediaExtractor + MediaCodec による実装はあきらめて他の方法を採用する
-必要があります。
-
-あるいは、MediaExtractor 相当の機能を自力で用意して、ビデオストリームの
-デコードだけ MediaCodec でハードウェア支援させるという方法もあるかも？
-(このあたりは未調査)

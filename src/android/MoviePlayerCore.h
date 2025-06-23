@@ -3,18 +3,22 @@
 #include "VideoTrackPlayer.h"
 #include "AudioTrackPlayer.h"
 #include "MediaClock.h"
-
 #include "media/NdkMediaExtractor.h"
+#include <functional>
+
+class AudioEngine;
+class IMovieReadStream;
 
 // ムービープレイヤー内部実装クラス
 class MoviePlayerCore
 {
 public:
-  MoviePlayerCore();
+  MoviePlayerCore(bool useAudioEngine=true);
   virtual ~MoviePlayerCore();
 
   bool Open(const char *filepath);
   bool Open(int fd, off_t offset, off_t length);
+  bool Open(IMovieReadStream *stream);
 
   void Start();
 
@@ -41,10 +45,19 @@ public:
   bool IsPlaying() const;
   bool Loop() const;
 
-  void RenderFrame(uint8_t *dst, int32_t w, int32_t h, int32_t strideBytes,
-                   PixelFormat format);
+  void SetOnVideoDecoded(IMoviePlayer::OnVideoDecoded func) {
+    if (mVideoTrackPlayer) {
+      mVideoTrackPlayer->SetOnVideoDecoded(func, mPixelFormat);
+    }
+  }
 
-  void SetOnAudioDecoded(OnAudioDecoded func, void *userPtr);
+  void SetOnAudioDecoded(OnAudioDecoded func, void *userPtr) {
+    if (mAudioTrackPlayer) {
+      mAudioTrackPlayer->SetOnAudioDecoded(func, userPtr);
+    }
+  }
+
+  bool ReadAudioData(uint8_t* buffer, uint64_t frameCount, uint64_t* framesRead);
 
 private:
   void Init();
@@ -52,6 +65,7 @@ private:
 
   AMediaExtractor *CreateExtractor(const char *filepath);
   AMediaExtractor *CreateExtractor(int fd, off_t offset, off_t length);
+  AMediaExtractor *CreateExtractor(IMovieReadStream *stream);
 
   bool SetupVideoTrackPlayer(AMediaExtractor *ex);
   bool SetupAudioTrackPlayer(AMediaExtractor *ex);
@@ -77,7 +91,8 @@ private:
   // video 情報
   PixelFormat mPixelFormat;
 
-  // audio 情報
-  OnAudioDecoded mOnAudioDecoded;
-  void *mOnAudioDecodedUserPtr;
+#ifdef INNER_AUDIOENGINE
+  // 内部オーディオエンジン
+  AudioEngine *mAudioEngine;
+#endif
 };

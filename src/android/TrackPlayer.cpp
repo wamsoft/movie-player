@@ -210,7 +210,7 @@ TrackPlayer::Decode(int32_t flags)
   bool isDecodeCompleted = mSawInputEOS && mSawOutputEOS;
   if (isDecodeCompleted) {
     // 最後のフレームは(Duration-現フレームPTS)分だけ残す
-    int64_t postDelay = mClock->GetDuration() - mClock->GetCurrentMediaTime();
+    int64_t postDelay = mClock->GetDuration() - mClock->GetPresentationTime();
     std::this_thread::sleep_for(std::chrono::microseconds(postDelay));
     // LOGV("render post delay sleep: %lld us \n", postDelay);
     if (mIsLoop) {
