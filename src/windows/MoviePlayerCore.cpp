@@ -862,6 +862,11 @@ MoviePlayerCore::SetVideoFrame(DecodedBuffer *newFrame)
     DecodedBuffer *prevFrame = mVideoFrame;
     mVideoFrame              = newFrame;
 
+    if (prevFrame == mVideoFrame) {
+      // 前フレームと同じなら何もしない
+      return;
+    }
+
     EnqueueVideo(mVideoFrame);
 
     // LOGV("new video frame: pts=%" PRId64 " us\n", ns_to_us(mVideoFrame->timeStampNs));
