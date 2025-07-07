@@ -1021,7 +1021,13 @@ void
 MoviePlayerCore::EnqueueVideo(DecodedBuffer *data)
 {
   if (mOnVideoDecodedFunc) {
-    mOnVideoDecodedFunc(data);
+    if (data->v.width > 0 && data->v.height > 0) {
+      // ビデオフレームのサイズが0x0でない場合はコールバックを呼ぶ
+      mOnVideoDecodedFunc(data);
+    } else {
+      // サイズが0x0の場合は、コールバックは呼ばない
+      LOGV("video frame size is 0x0, skip callback\n");
+    }
   }
 }
 
