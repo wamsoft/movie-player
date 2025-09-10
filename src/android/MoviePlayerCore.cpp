@@ -406,6 +406,12 @@ MoviePlayerCore::SetPixelFormat(PixelFormat format)
   mPixelFormat = format;
 }
 
+bool
+MoviePlayerCore::IsVideoAvailable() const
+{
+  return (mVideoTrackPlayer != nullptr && mVideoTrackPlayer->IsValid());
+}
+
 int32_t
 MoviePlayerCore::Width() const
 {
@@ -498,3 +504,24 @@ MoviePlayerCore::Loop() const
   return mIsLoop;
 }
 
+void
+MoviePlayerCore::SetVolume(float volume)
+{
+#ifdef INNER_AUDIOENGINE
+  if (mAudioEngine) {
+    mAudioEngine->SetVolume(volume);
+  }
+#endif
+}
+
+float
+MoviePlayerCore::Volume() const
+{
+  float volume = 1.0f;
+#ifdef INNER_AUDIOENGINE
+  if (mAudioEngine) {
+    volume = mAudioEngine->Volume();
+  }
+#endif
+  return volume;
+}

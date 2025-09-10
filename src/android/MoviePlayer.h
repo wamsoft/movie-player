@@ -17,9 +17,9 @@ public:
   bool Open(int fd, off_t offset, off_t length);
   bool Open(AAssetManager *mgr, const char *filepath);
 
-  virtual State GetState() const override;
-
-  virtual void SetOnState(OnState func, void *userPtr) override;
+  // XXX: 未実装
+  virtual State GetState() const override { return State::STATE_UNINIT; }
+  virtual void SetOnState(OnState func, void *userPtr) override {}
 
   virtual void Play(bool loop = false) override;
   virtual void Stop() override;

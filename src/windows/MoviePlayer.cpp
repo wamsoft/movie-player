@@ -50,7 +50,7 @@ conv_pixel_format(PixelFormat pixelFormat)
 {
   IMoviePlayer::ColorFormat colorFormat = IMoviePlayer::COLOR_UNKNOWN;
 
-  switch (colorFormat) {
+  switch (pixelFormat) {
   case PIXEL_FORMAT_UNKNOWN:
     colorFormat = IMoviePlayer::COLOR_UNKNOWN;
     break;

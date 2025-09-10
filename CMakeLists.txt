@@ -40,9 +40,62 @@ cmake_policy(SET CMP0064 ${pre_cmp0064})
 endif()
 
 # ------------------------------------------------------------------------------
+# Android
+# ------------------------------------------------------------------------------
+
+if(ANDROID)
+
+add_library(${PROJ_NAME} STATIC
+	src/common/MessageLooper.cpp
+	src/common/PixelConvert.cpp
+	src/common/MediaClock.cpp
+	src/common/AudioEngine.cpp
+	src/android/TrackPlayer.cpp
+	src/android/VideoTrackPlayer.cpp
+	src/android/AudioTrackPlayer.cpp
+	src/android/MoviePlayerCore.cpp
+	src/android/MoviePlayer.cpp
+	)
+
+target_compile_definitions(${PROJ_NAME} PUBLIC
+	INNER_AUDIOENGINE=1
+)
+
+#  miniaudio
+find_path(MINIAUDIO_INCLUDE_DIRS "miniaudio.h")
+target_include_directories(${PROJ_NAME} PRIVATE ${MINIAUDIO_INCLUDE_DIRS})
+
+if(MOVIEPLAYER_EXTERNAL_MINIAUDIO)
+target_compile_definitions(${PROJ_NAME} PUBLIC
+	EXTERNAL_MINIAUDIO=1
+)
+endif()
+
+
+target_include_directories(${PROJ_NAME} 
+PUBLIC 
+	include
+PRIVATE
+	src/android
+	extlibs/libyuv/include
+	src/common
+	)
+
+find_library(log-lib log)
+
+target_link_libraries(${PROJ_NAME} PUBLIC
+	${log-lib}
+	android
+	mediandk
+	OpenMAXAL
+	yuv
+	)
+
+else()
+
+# ------------------------------------------------------------------------------
 # nestegg版対応アーキテクチャ共通
 # ------------------------------------------------------------------------------
-if(WIN32 OR LINUX)
 
 if(WIN32)
 # ※add_compile_options は add_library()/add_executable() の前に
@@ -133,55 +186,5 @@ find_package(Threads REQUIRED)
 target_link_libraries(${PROJ_NAME} PUBLIC ${CMAKE_THREAD_LIBS_INIT})
 endif()
 
-endif()
-
-# ------------------------------------------------------------------------------
-# Android
-# ------------------------------------------------------------------------------
-if(ANDROID)
-
-add_library(${PROJ_NAME} STATIC
-	src/common/MessageLooper.cpp
-	src/common/PixelConvert.cpp
-	src/android/TrackPlayer.cpp
-	src/android/VideoTrackPlayer.cpp
-	src/android/AudioTrackPlayer.cpp
-	src/android/MoviePlayerCore.cpp
-	src/android/MoviePlayer.cpp
-	)
-
-target_compile_definitions(${PROJ_NAME} PUBLIC
-	INNER_AUDIOENGINE=1
-)
-
-#  miniaudio
-find_path(MINIAUDIO_INCLUDE_DIRS "miniaudio.h")
-target_include_directories(${PROJ_NAME} PRIVATE ${MINIAUDIO_INCLUDE_DIRS})
-
-if(MOVIEPLAYER_EXTERNAL_MINIAUDIO)
-target_compile_definitions(${PROJ_NAME} PUBLIC
-	EXTERNAL_MINIAUDIO=1
-)
-endif()
-
-
-target_include_directories(${PROJ_NAME} 
-PUBLIC 
-	include
-PRIVATE
-	src/android
-	extlibs/libyuv/include
-	src/common
-	)
-
-find_library(log-lib log)
-
-target_link_libraries(${PROJ_NAME} PUBLIC
-	${log-lib}
-	android
-	mediandk
-	OpenMAXAL
-	yuv
-	)
-
+# ANDROID
 endif()

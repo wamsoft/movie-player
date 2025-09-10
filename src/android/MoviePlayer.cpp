@@ -63,6 +63,44 @@ conv_color_format(IMoviePlayer::ColorFormat colorFormat)
   return pixelFormat;
 }
 
+static inline IMoviePlayer::ColorFormat
+conv_pixel_format(PixelFormat pixelFormat)
+{
+  IMoviePlayer::ColorFormat colorFormat = IMoviePlayer::COLOR_UNKNOWN;
+
+  switch (pixelFormat) {
+  case PIXEL_FORMAT_UNKNOWN:
+    colorFormat = IMoviePlayer::COLOR_UNKNOWN;
+    break;
+  case PIXEL_FORMAT_ABGR:
+    colorFormat = IMoviePlayer::COLOR_ABGR;
+    break;
+  case PIXEL_FORMAT_ARGB:
+    colorFormat = IMoviePlayer::COLOR_ARGB;
+    break;
+  case PIXEL_FORMAT_RGBA:
+    colorFormat = IMoviePlayer::COLOR_RGBA;
+    break;
+  case PIXEL_FORMAT_BGRA:
+    colorFormat = IMoviePlayer::COLOR_BGRA;
+    break;
+  case PIXEL_FORMAT_I420:
+    colorFormat = IMoviePlayer::COLOR_I420;
+    break;
+  case PIXEL_FORMAT_NV12:
+    colorFormat = IMoviePlayer::COLOR_NV12;
+    break;
+  case PIXEL_FORMAT_NV21:
+    colorFormat = IMoviePlayer::COLOR_NV21;
+    break;
+  default:
+    ASSERT(false, "unknown internal pixel format: %d\n", colorFormat);
+    break;
+  }
+
+  return colorFormat;
+}
+
 // -----------------------------------------------------------------------------
 // MoviePlayer
 // -----------------------------------------------------------------------------
@@ -196,6 +234,28 @@ MoviePlayer::SetLoop(bool loop)
   }
 }
 
+bool
+MoviePlayer::IsVideoAvailable() const
+{
+  if (mPlayer) {
+    return mPlayer->IsVideoAvailable();
+  } else {
+    return false;
+  }
+}
+
+void
+MoviePlayer::GetVideoFormat(VideoFormat *format) const
+{
+  if (IsVideoAvailable() && format != nullptr) {
+    format->width       = mPlayer->Width();
+    format->height      = mPlayer->Height();
+    //未実装
+    //format->frameRate   = mPlayer->FrameRate();
+    //format->colorFormat = conv_pixel_format(mPlayer->OutputPixelFormat());
+  }
+}
+
 void
 MoviePlayer::SetColorFormat(ColorFormat format)
 {
@@ -264,6 +324,24 @@ MoviePlayer::GetAudioFormat(AudioFormat *format) const
   }
 }
 
+void
+MoviePlayer::SetVolume(float volume)
+{
+  if (mPlayer) {
+    mPlayer->SetVolume(volume);
+  }
+}
+
+float
+MoviePlayer::Volume() const
+{
+  float volume = 1.0f;
+  if (mPlayer) {
+    volume = mPlayer->Volume();
+  }
+  return volume;
+}
+
 int64_t
 MoviePlayer::Duration() const
 {
@@ -301,14 +379,6 @@ MoviePlayer::Loop() const
     return mPlayer->Loop();
   } else {
     return false;
-  }
-}
-
-void
-MoviePlayer::SetOnState(OnState func, void *userPtr)
-{
-  if (mPlayer) {
-//    mPlayer->SetOnState(func, userPtr);
   }
 }
 

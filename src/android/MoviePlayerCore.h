@@ -31,14 +31,20 @@ public:
 
   void SetPixelFormat(PixelFormat format);
 
+  bool IsVideoAvailable() const;
   int32_t Width() const;
   int32_t Height() const;
+  //未実装
+  //float FrameRate() const;
+  //PixelFormat OutputPixelFormat() const;
 
   bool IsAudioAvailable() const;
   int32_t SampleRate() const;
   int32_t Channels() const;
   int32_t BitsPerSample() const;
   int32_t Encoding() const;
+  void SetVolume(float volume);
+  float Volume() const;
 
   int64_t Duration() const;
   int64_t Position() const;
