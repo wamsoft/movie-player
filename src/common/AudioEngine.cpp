@@ -68,6 +68,47 @@ static void DoneMiniAudio() {
 
 #endif // EXTERNAL_MINIAUDIO
 
+class AudioEngineMiniAudio;
+
+struct my_data_source
+{
+  ma_data_source_base base;
+  ma_format format;
+  ma_uint32 channels;
+  ma_uint32 sampleRate;
+  AudioEngineMiniAudio *engine;
+};
+
+class AudioEngineMiniAudio : public AudioEngine
+{
+public:
+  AudioEngineMiniAudio();
+  virtual ~AudioEngineMiniAudio();
+
+  virtual bool Init(AudioCallback callback, void* userData, AudioFormat format, int32_t channels,
+            int32_t sampleRate);
+  virtual void Done();
+
+  virtual void Start();
+  virtual void Stop();
+
+  virtual void SetVolume(float vol);
+  virtual float Volume() const;
+
+  ma_result ReadData(void *pFramesOut, ma_uint64 frameCount, ma_uint64 *pFramesRead);
+
+private:
+  float mVolume;
+  ma_sound mSound;
+  my_data_source mSource;
+  int32_t mFrameSize;
+  bool mInited;
+
+  AudioCallback mAudioCallback;
+  void* mUserData;
+};
+
+
 // -----------------------------------------------------------------------------
 // miniaudio data source vtable
 // -----------------------------------------------------------------------------
@@ -77,7 +118,7 @@ my_data_source_read(ma_data_source *pDataSource, void *pFramesOut, ma_uint64 fra
 {
   my_data_source *self = (my_data_source *)pDataSource;
   if (self) {
-    AudioEngine *engine = self->engine;
+    AudioEngineMiniAudio *engine = self->engine;
     if (engine) {
       return engine->ReadData(pFramesOut, frameCount, pFramesRead);
     }
@@ -143,17 +184,17 @@ static ma_data_source_vtable s_my_data_source_vtable = {
 // -----------------------------------------------------------------------------
 // AudioEngine
 // -----------------------------------------------------------------------------
-AudioEngine::AudioEngine()
+AudioEngineMiniAudio::AudioEngineMiniAudio()
 : mAudioCallback(nullptr), mUserData(nullptr), mInited(false)
 {
   // 先行して初期化しておく
   (void)GetMiniAudioEngine();
 }
 
-AudioEngine::~AudioEngine() {}
+AudioEngineMiniAudio::~AudioEngineMiniAudio() {}
 
 bool
-AudioEngine::Init(AudioCallback callback, void* userData, AudioFormat format, int32_t channels,
+AudioEngineMiniAudio::Init(AudioCallback callback, void* userData, AudioFormat format, int32_t channels,
                   int32_t sampleRate)
 {
   if (mInited) {
@@ -216,7 +257,7 @@ AudioEngine::Init(AudioCallback callback, void* userData, AudioFormat format, in
 }
 
 void
-AudioEngine::Done()
+AudioEngineMiniAudio::Done()
 {
   if (mInited) {
     Stop();
@@ -227,7 +268,7 @@ AudioEngine::Done()
 }
 
 void
-AudioEngine::Start()
+AudioEngineMiniAudio::Start()
 {
   // MEMO
   // 多重startはma_sound_start()内部でケアされている
@@ -244,7 +285,7 @@ AudioEngine::Start()
 }
 
 void
-AudioEngine::Stop()
+AudioEngineMiniAudio::Stop()
 {
   if (!mInited) {
     LOGE("AudioEngine is not initialized.\n");
@@ -257,15 +298,15 @@ AudioEngine::Stop()
 }
 
 void
-AudioEngine::SetVolume(float vol)
+AudioEngineMiniAudio::SetVolume(float vol)
 {
+  if (vol < 0.0f) {
+    vol = 0.0f;
+  }
+  if (vol > 1.0f) {
+    vol = 1.0f;
+  }
   if (mVolume != vol) {
-    if (vol < 0.0f) {
-      vol = 0.0f;
-    }
-    if (vol > 1.0f) {
-      vol = 1.0f;
-    }
     mVolume = vol;
     if (mInited) {
       ma_sound_set_volume(&mSound, vol);
@@ -274,13 +315,13 @@ AudioEngine::SetVolume(float vol)
 }
 
 float
-AudioEngine::Volume() const
+AudioEngineMiniAudio::Volume() const
 {
   return mVolume;
 }
 
 ma_result
-AudioEngine::ReadData(void *pFramesOut, ma_uint64 frameCount, ma_uint64 *pFramesRead)
+AudioEngineMiniAudio::ReadData(void *pFramesOut, ma_uint64 frameCount, ma_uint64 *pFramesRead)
 {
   bool updated         = false;
   ma_uint64 framesRead = 0;
@@ -305,4 +346,9 @@ AudioEngine::ReadData(void *pFramesOut, ma_uint64 frameCount, ma_uint64 *pFrames
   }
 
   return updated ? MA_SUCCESS : MA_BUSY;
+}
+
+AudioEngine* CreateAudioEngine()
+{
+  return new AudioEngineMiniAudio();
 }

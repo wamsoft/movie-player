@@ -10,7 +10,14 @@ endif()
 set(PROJ_NAME movieplayer)
 project(${PROJ_NAME})
 
+option(MOVIEPLAYER_EXTERNAL_SDL "use external sdl" OFF)
 option(MOVIEPLAYER_EXTERNAL_MINIAUDIO "use external miniaudio" OFF)
+
+if(MOVIEPLAYER_EXTERNAL_SDL)
+set(AUDIO_ENGINE_SOURCES src/common/AudioEngineSDL.cpp)
+else()
+set(AUDIO_ENGINE_SOURCES src/common/AudioEngine.cpp)
+endif()
 
 # ------------------------------------------------------------------------------
 # Win64チェック / 必ず project() 以後に呼ぶ
@@ -49,7 +56,7 @@ add_library(${PROJ_NAME} STATIC
 	src/common/MessageLooper.cpp
 	src/common/PixelConvert.cpp
 	src/common/MediaClock.cpp
-	src/common/AudioEngine.cpp
+	${AUDIO_ENGINE_SOURCES}
 	src/android/TrackPlayer.cpp
 	src/android/VideoTrackPlayer.cpp
 	src/android/AudioTrackPlayer.cpp
@@ -61,14 +68,21 @@ target_compile_definitions(${PROJ_NAME} PUBLIC
 	INNER_AUDIOENGINE=1
 )
 
+if(MOVIEPLAYER_EXTERNAL_SDL)
+find_package(SDL3 REQUIRED)
+target_compile_definitions(${PROJ_NAME} PUBLIC
+	EXTERNAL_SDL=1
+)
+target_link_libraries(${PROJ_NAME} PUBLIC SDL3::SDL3)
+else()
 #  miniaudio
 find_path(MINIAUDIO_INCLUDE_DIRS "miniaudio.h")
 target_include_directories(${PROJ_NAME} PRIVATE ${MINIAUDIO_INCLUDE_DIRS})
-
 if(MOVIEPLAYER_EXTERNAL_MINIAUDIO)
 target_compile_definitions(${PROJ_NAME} PUBLIC
 	EXTERNAL_MINIAUDIO=1
 )
+endif()
 endif()
 
 
@@ -107,7 +121,7 @@ endif()
 add_library(${PROJ_NAME} STATIC
 	src/common/MessageLooper.cpp
 	src/common/PixelConvert.cpp
-	src/common/AudioEngine.cpp
+	${AUDIO_ENGINE_SOURCES}
 	src/common/MediaClock.cpp
 	src/windows/Decoder.cpp
 	src/windows/VpxDecoder.cpp
@@ -125,10 +139,21 @@ target_compile_definitions(${PROJ_NAME} PUBLIC
 	INNER_AUDIOENGINE=1
 )
 
+if(MOVIEPLAYER_EXTERNAL_SDL)
+find_package(SDL3 REQUIRED)
+target_compile_definitions(${PROJ_NAME} PUBLIC
+	EXTERNAL_SDL=1
+)
+target_link_libraries(${PROJ_NAME} PUBLIC SDL3::SDL3)
+else()
+#  miniaudio
+find_path(MINIAUDIO_INCLUDE_DIRS "miniaudio.h")
+target_include_directories(${PROJ_NAME} PRIVATE ${MINIAUDIO_INCLUDE_DIRS})
 if(MOVIEPLAYER_EXTERNAL_MINIAUDIO)
 target_compile_definitions(${PROJ_NAME} PUBLIC
 	EXTERNAL_MINIAUDIO=1
 )
+endif()
 endif()
 
 target_include_directories(${PROJ_NAME} 
@@ -171,10 +196,6 @@ target_link_libraries(${PROJ_NAME} PUBLIC Vorbis::vorbis)
 # opus
 find_package(Opus CONFIG REQUIRED)
 target_link_libraries(${PROJ_NAME} PUBLIC Opus::opus)
-
-#  miniaudio
-find_path(MINIAUDIO_INCLUDE_DIRS "miniaudio.h")
-target_include_directories(${PROJ_NAME} PRIVATE ${MINIAUDIO_INCLUDE_DIRS})
 
 # ------------------------------------------------------------------------------
 # nestegg版対応アーキテクチャ個別：Linux

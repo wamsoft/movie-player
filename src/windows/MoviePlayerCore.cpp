@@ -27,7 +27,7 @@ MoviePlayerCore::MoviePlayerCore(PixelFormat pixelFormat, bool useAudioEngine)
 {
 #ifdef INNER_AUDIOENGINE
   if (useAudioEngine) {
-    mAudioEngine = new AudioEngine();
+    mAudioEngine = CreateAudioEngine();
   }
 #endif
   Init();
