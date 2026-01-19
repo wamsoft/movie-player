@@ -127,7 +127,7 @@ main(int argc, char *argv[])
     int64_t pausePoint  = rand(mt);
     int32_t pauseFrames = 120;
 
-    // GetVideoFrame() で描画済みフレームを受け取るバッファを用意
+    // 描画済みフレームを受け取るバッファを用意
     int pixelBytes  = w * h * 4;
     uint8_t *pixels = new uint8_t[pixelBytes];
     memset(pixels, 0xff, pixelBytes);
@@ -143,6 +143,19 @@ main(int argc, char *argv[])
       }
     }
     renderer.UpdateTexture(pixels, pixelBytes);
+    bool updateFlag = false;
+
+    // 描画済みフレーム受け取りコールバックを設定
+    player->SetOnVideoDecoded(
+        [&](int vw, int vh, IMoviePlayer::DestUpdater updater) {
+          // 描画済みフレームを受け取る
+#if defined(TEST_DIB_MODE)
+          updater((char *)pixels + w * (h-1) * 4, -w * 4); // DIB想定で逆さま
+#else
+          updater((char *)pixels, w * 4);
+#endif
+          updateFlag = true;
+        });
 
     // 再生開始
     bool pausing = false;
@@ -157,14 +170,10 @@ main(int argc, char *argv[])
         printf("MoviePlayerTest: play finished\n");
         break;
       }
-
-#if defined(TEST_DIB_MODE)
-      // DIBの逆stride状態を想定したケース用
-      player->GetVideoFrame(pixels + w * (h - 1) * 4, w, h, -1 * w *);
-#else
-      player->GetVideoFrame(pixels, w, h, w * 4);
-#endif
-      renderer.UpdateTexture(pixels, pixelBytes);
+      if (updateFlag) {
+        renderer.UpdateTexture(pixels, pixelBytes);
+        updateFlag = false;
+      } 
       renderer.Render(frameCount);
 
       glfwSwapBuffers(glfwWin);

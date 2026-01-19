@@ -54,6 +54,14 @@ main(int argc, char *argv[])
     uint8_t *pixels = new uint8_t[pixelBytes];
     memset(pixels, 0xff, pixelBytes);
 
+    bool updateFlag = false;
+    // 描画済みフレーム受け取りコールバックを設定
+    player->SetOnVideoDecoded(
+        [&](int vw, int vh, IMoviePlayer::DestUpdater updater) {
+          updater((char *)pixels, w * 4);
+          updateFlag = true;
+        });
+
     // 再生開始
     bool loop = false;
     player->Play(loop);
@@ -62,16 +70,17 @@ main(int argc, char *argv[])
     // 再生終了か画面タッチで終了
     int frameCount = 0;
     while (player->IsPlaying()) {
-      player->GetVideoFrame(pixels, w, h, w * 4);
-
-      // bmp出力(pngだと1fpsでもおっつかない
-      // あと、テスト用なのでとにかく画像が出れば何でもいいので)
-      std::string outFile = outBaseName + std::to_string(frameCount) + ".bmp";
-      printf("%s @ time = %" PRId64 " / %" PRId64 " us \n", outFile.c_str(),
-             player->Position(), total);
-      stbi_write_bmp(outFile.c_str(), w, h, 4, pixels);
-
-      frameCount++;
+      if (updateFlag) {
+        // フレーム更新があったらテクスチャ更新
+        // bmp出力(pngだと1fpsでもおっつかない
+        // あと、テスト用なのでとにかく画像が出れば何でもいいので)
+        std::string outFile = outBaseName + std::to_string(frameCount) + ".bmp";
+        printf("%s @ time = %" PRId64 " / %" PRId64 " us \n", outFile.c_str(),
+              player->Position(), total);
+        stbi_write_bmp(outFile.c_str(), w, h, 4, pixels);
+        frameCount++;
+        updateFlag = false;
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(1000)); // 1fps
     }
 

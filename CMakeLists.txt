@@ -10,6 +10,7 @@ endif()
 set(PROJ_NAME movieplayer)
 project(${PROJ_NAME})
 
+option(BUILD_TEST "build test programs" OFF)
 option(MOVIEPLAYER_EXTERNAL_SDL "use external sdl" OFF)
 option(MOVIEPLAYER_EXTERNAL_MINIAUDIO "use external miniaudio" OFF)
 
@@ -93,7 +94,7 @@ PRIVATE
 	src/android
 	extlibs/libyuv/include
 	src/common
-	)
+)
 
 find_library(log-lib log)
 
@@ -205,6 +206,10 @@ if(LINUX)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(${PROJ_NAME} PUBLIC ${CMAKE_THREAD_LIBS_INIT})
+endif()
+
+if (BUILD_TEST)
+add_subdirectory(test/windows)
 endif()
 
 # ANDROID

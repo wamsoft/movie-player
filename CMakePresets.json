@@ -66,18 +66,43 @@
             }
         },
         {
+            "name": "osx",
+            "displayName": "for osx",
+            "inherits": "default",
+            "cacheVariables": {
+                "VCPKG_CRT_LINKAGE":"dynamic",
+                "VCPKG_LIBRARY_LINKAGE":"static"
+            }
+        },
+        {
+            "name": "x64-osx",
+            "displayName": "for osx x64",
+            "description": "osx x64 build",
+            "inherits": "osx",
+            "cacheVariables": {
+                "VCPKG_TARGET_TRIPLET":"x64-osx",
+                "VCPKG_TARGET_ARCHITECTURE":"x64"
+            }
+        },
+        {
+            "name": "arm64-osx",
+            "displayName": "for osx arm64",
+            "description": "osx arm64 build",
+            "inherits": "osx",
+            "cacheVariables": {
+                "VCPKG_TARGET_TRIPLET":"arm64-osx",
+                "VCPKG_TARGET_ARCHITECTURE":"arm64"
+            }
+        },
+        {
             "name": "android",
             "displayName": "for android",
             "inherits": "default",
             "cacheVariables": {
                 "CMAKE_SIZEOF_VOID_P_OVERRIDE":"8",
                 "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/toolchains/android.cmake",
-                "VCPKG_CRT_LINKAGE":"static",
-                "VCPKG_LIBRARY_LINKAGE":"static",
-                "CMAKE_SHARED_LINKER_FLAGS":"-Wl,--gc-sections",
-                "CMAKE_C_FLAGS_RELEASE":"-s",
-                "CMAKE_CXX_FLAGS_RELEASE":"-s",
-                "ANDROID_PLATFORM":"29"
+                "ANDROID_PLATFORM":"android-29",
+                "ANDROID_STL":"c++_shared"
             }
         },
         {
@@ -86,8 +111,6 @@
             "description": "android arm64 build",
             "inherits": "android",
             "cacheVariables": {
-                "VCPKG_TARGET_TRIPLET":"arm64-android",
-                "VCPKG_TARGET_ARCHITECTURE":"arm64",
                 "ANDROID_ABI":"arm64-v8a"
             }
         },
@@ -97,11 +120,39 @@
             "description": "android x64 build",
             "inherits": "android",
             "cacheVariables": {
-                "VCPKG_TARGET_TRIPLET":"x64-android",
-                "VCPKG_TARGET_ARCHITECTURE":"x64",
-                "DEFOLD_TRIPLET":"x86_64-android",
                 "ANDROID_ABI":"x86_64"
             }
+        }
+    ],
+
+    "buildPresets": [
+        {
+            "name": "x86-windows",
+            "configurePreset": "x86-windows"
+        },
+        {
+            "name": "x64-windows",
+            "configurePreset": "x64-windows"
+        },
+        {
+            "name": "x64-linux",
+            "configurePreset": "x64-linux"
+        },
+        {
+            "name": "x64-osx",
+            "configurePreset": "x64-osx"
+        },
+        {
+            "name": "arm64-osx",
+            "configurePreset": "arm64-osx"
+        },
+        {
+            "name": "arm64-android",
+            "configurePreset": "arm64-android"
+        },
+        {
+            "name": "x64-android",
+            "configurePreset": "x64-android"
         }
     ]
 }

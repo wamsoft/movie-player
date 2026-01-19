@@ -1,9 +1,6 @@
 # About
 
-WebM 動画再生ライブラリ作成用の作業レポジトリです。
-
-Android は MediaExtractor/MediaCodec を使用するため、
-WebM 以外の各種動画フォーマットにも対応します。
+WebM 動画再生ライブラリです
 
 # 状況
 
@@ -11,7 +8,6 @@ WebM 以外の各種動画フォーマットにも対応します。
 
 - Android
   - NDK の MediaExtractor+MediaCodec で対応
-  - ビデオのみ動作。オーディオ非対応
 - Windows
   - nestegg + libvpx で cpu でのデコードで対応
   - miniaudio を内蔵して音声対応
@@ -69,7 +65,7 @@ miniaudio での対応になります（AudioEngine.cpp）
 
 ### 利用方法
 
-`IMoviePlayer::CreateMovePlayer(const char *filename, InitParam &param)`
+`IMoviePlayer::CreateMoviePlayer(const char *filename, InitParam &param)`
 `IMoviePlayer::CreateMoviePlayer(IMovieReadStream *stream, InitParam &param)`
 
 で、`IMoviePlayer`のインスタンスを作成して使用します。
@@ -118,7 +114,11 @@ vcpkg + cmake の環境を想定しています。
 
 `tests/windows/CMakeLists.txt` で両方同時にビルドされるようにしてあります。
 
+※上位の CMakeLists.tx から -DBUILD_TEST=ON であわせてビルドされます
+
 ### 採用ライブラリ等
+
+原則 vcpkg で参照します。
 
 - libvpx / vcpkg / Windows 版のみ
 - libogg / vcpkg / Windows 版のみ
@@ -227,7 +227,7 @@ MoviewPlayer のインスタンスごとにスレッドが生まれる感じに�
 
 ### 要求 API バージョン
 
-AMediaDataSource を扱う関係で API 28 (Android 9.0) 以上を要求します。
+AMediaDataSource を扱う関係で API29 (Android 10.0) 以上を要求します。
 
 ### ライブラリのビルド方法
 
