@@ -23,7 +23,7 @@ public class MainActivity extends AppCompatActivity {
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
-        TestMovieView.setAssetManager(getAssets());
+        MyMoviePlayer.setAssetManager(getAssets());
 
         // Example of a call to a native method
         // TextView tv = binding.sampleText;
@@ -51,8 +51,8 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void run() {
-                tv.setText(String.format("%12d", position()) + "/"
-                        + String.format("%12d", duration()));
+                tv.setText(String.format("%12d", binding.testMovieView.position()) + "/"
+                        + String.format("%12d", binding.testMovieView.duration()));
                 m_handler.postDelayed(this, 10);
             }
         };
@@ -62,12 +62,4 @@ public class MainActivity extends AppCompatActivity {
     protected void StopThread() {
         m_handler.removeCallbacks(m_runnable);
     }
-
-    /**
-     * A native method that is implemented by the 'testmovieplayer' native library, which is
-     * packaged with this application.
-     */
-    public native int duration();
-
-    public native int position();
 }

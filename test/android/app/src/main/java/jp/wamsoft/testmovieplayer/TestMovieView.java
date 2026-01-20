@@ -65,7 +65,7 @@ public class TestMovieView extends SurfaceView implements SurfaceHolder.Callback
     private class DrawThread extends Thread {
         public void run() {
             SurfaceHolder holder = getHolder();
-            while (isPlaying()) {
+            while (mPlayer != null && mPlayer.isPlaying()) {
                 if (updateMovie()) {
                     Canvas canvas = holder.lockCanvas();
                     if (canvas != null) {
@@ -85,10 +85,14 @@ public class TestMovieView extends SurfaceView implements SurfaceHolder.Callback
     // ムービーセットアップ
     private void setupMovie() {
 
-        createPlayer("Big_Buck_Bunny_1080_10s_1MB_VP8.webm");
+        if (mPlayer == null) {
+            mPlayer = new MyMoviePlayer();
+        }
+        //mPlayer.createPlayer("Big_Buck_Bunny_1080_10s_1MB_VP8.webm");
+        mPlayer.createPlayer("title.webm");
 
-        width = width();
-        height = height();
+        width = mPlayer.getWidth();
+        height = mPlayer.getHeight();
 
         // ピクセルのパック表現@LE: 0xAABBGGRR
         // (A & 0xff) << 24 | (B & 0xff) << 16 | (G & 0xff) << 8 | (R & 0xff);
@@ -96,15 +100,17 @@ public class TestMovieView extends SurfaceView implements SurfaceHolder.Callback
 
         // 開始
         boolean loop = true;
-        startPlayer(loop);
+        mPlayer.startPlayer(loop);
     }
 
     // レンダリングされた動画フレームを取得してBitmapにコピー
     private boolean updateMovie() {
-        ByteBuffer buffer = getUpdatedBuffer();
-        if (buffer != null) {
-            movieBitmap.copyPixelsFromBuffer(buffer);
-            return true;
+        if (mPlayer != null) {
+            ByteBuffer buffer = mPlayer.getUpdatedBuffer();
+            if (buffer != null) {
+                movieBitmap.copyPixelsFromBuffer(buffer);
+                return true;
+            }
         }
         return false;
     }
@@ -112,10 +118,7 @@ public class TestMovieView extends SurfaceView implements SurfaceHolder.Callback
     // 画像を表示する
     private void drawMovie(Canvas canvas) {
         Paint paint = new Paint();
-        int left = (canvas.getWidth() - movieBitmap.getWidth()) / 2;
-        int top = (canvas.getHeight() - movieBitmap.getHeight()) / 2;
-
-        canvas.drawBitmap(movieBitmap, left, top, paint);
+        canvas.drawBitmap(movieBitmap, 0, 0, paint);
     }
 
     @Override
@@ -133,24 +136,19 @@ public class TestMovieView extends SurfaceView implements SurfaceHolder.Callback
     @Override
     public void surfaceDestroyed(@NonNull SurfaceHolder holder) {
         thread = null;
+        if (mPlayer != null) {
+            mPlayer.stopPlayer();
+             // Playスレッドが止まるのを待つべきだが、とりあえずstop
+        }
     }
 
-    // JNIインターフェース
-    public static native boolean createPlayer(String path);
+    private MyMoviePlayer mPlayer;
 
-    public static native ByteBuffer getUpdatedBuffer();
+    public int duration() {
+        return mPlayer != null ? mPlayer.getDuration() : 0;
+    }
 
-    public static native int width();
-
-    public static native int height();
-
-    public static native boolean isPlaying();
-
-    public static native void startPlayer(boolean loop);
-
-    public static native void stopPlayer();
-
-    public static native void shutdownPlayer();
-
-    public static native void setAssetManager(Object assetManager);
+    public int position() {
+        return mPlayer != null ? mPlayer.getPosition() : 0;
+    }
 }

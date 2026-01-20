@@ -50,12 +50,18 @@ AudioTrackPlayer::AudioTrackPlayer(AMediaExtractor *ex, int32_t trackIndex,
 #else
   AMediaFormat_getInt32(outFormat, "bits-per-sample", &mBitsPerSample);
 #endif
+  if (mBitsPerSample <= 0) {
+    mBitsPerSample = 16; // デフォルト16bitとしておく
+  }
 
 #ifdef AMEDIAFORMAT_KEY_PCM_ENCODING
   AMediaFormat_getInt32(outFormat, AMEDIAFORMAT_KEY_PCM_ENCODING, &mEncoding);
 #else
   AMediaFormat_getInt32(outFormat, "pcm-encoding", &mEncoding);
 #endif
+  if (mEncoding <= 0) {
+    mEncoding = kAudioEncodingPcm16bit;
+  }
 
   // リングバッファを初期化（2秒分）
   InitRingBuffer();
