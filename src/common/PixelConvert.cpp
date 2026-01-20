@@ -55,6 +55,8 @@ convert_yuv_to_rgb32(uint8_t *dst, int32_t dstStride, PixelFormat dstFormat,
   case COLOR_SPACE_BT_601:
     yuvConstants = isLimited ? &libyuv::kYuvI601Constants : &libyuv::kYuvJPEGConstants;
     break;
+    case COLOR_SPACE_IDENTITY:
+    break;
   }
 
   using YuvAlphaConvFunc = decltype(libyuv::I420AlphaToARGBMatrix);

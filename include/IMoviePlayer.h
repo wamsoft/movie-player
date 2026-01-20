@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <cstdio>
-#include <sys/types.h>
 #include <functional>
 class IMovieReadStream {
 public:
@@ -18,21 +17,21 @@ public:
 class IMoviePlayer
 {
 public:
-  // RenderFrame用カラーフォーマット定数
-  // 並びはバイト列順なのでLEでは ARGB=0xBBGGRRAA
-  // OpenGLやDXGI(DX10～)と互換でDX9と逆
-  // libyuvはAPI名がxxxToARGBの場合はLEで0xBBGGRRAA
-  // 参考: IMoviePlayer::BGRA の場合
-  //  IMoviePlayer::ColorFormatと同じ並び
+  // Color format constants for RenderFrame
+  // The order is by byte sequence, so in LE it's ARGB=0xBBGGRRAA
+  // Compatible with OpenGL and DXGI (DX10+), inverse of DX9
+  // In libyuv, if API name is xxxToARGB, it's 0xBBGGRRAA in LE
+  // Reference: In case of IMoviePlayer::BGRA
+  //  Same order as IMoviePlayer::ColorFormat
   //    OpenGL: GL_BGRA
   //    DXGI:   DXGI_FORMAT_B8G8R8A8_UNORM
-  //  IMoviePlayer::ColorFormatと逆の並び
+  //  Inverse order of IMoviePlayer::ColorFormat
   //    DX9:    D3DFMT_A8R8G8B8
   //    libyuv: ARGB
   enum ColorFormat
   {
     COLOR_UNKNOWN = -1,
-    COLOR_NOCONV  = COLOR_UNKNOWN, // デコーダ出力を無変換で出す
+    COLOR_NOCONV  = COLOR_UNKNOWN, // Output decoder output without conversion
     COLOR_ARGB    = 0,
     COLOR_ABGR    = 1,
     COLOR_RGBA    = 2,
@@ -42,7 +41,7 @@ public:
     COLOR_NV21    = 12,
   };
 
-  // オーディオデータの形式
+  // Audio data format
   enum PcmEncoding
   {
     PCM_UNKNOWN = -1,
@@ -52,7 +51,7 @@ public:
     PCM_F32     = 3,
   };
 
-  // ビデオ出力フォーマット
+  // Video output format
   struct VideoFormat
   {
     int32_t width;
@@ -61,7 +60,7 @@ public:
     ColorFormat colorFormat;
   };
 
-  // オーディオ出力フォーマット
+  // Audio output format
   struct AudioFormat
   {
     int32_t sampleRate;
@@ -106,11 +105,11 @@ public:
     STATE_PRELOADING,
     STATE_PLAY,
     STATE_PAUSE,
-    STATE_STOP, // 停止された
-    STATE_FINISH, // 再生終了した
+    STATE_STOP, // Stopped
+    STATE_FINISH, // Playback finished
   };
 
-  // 生成パラメータ
+  // Creation parameters
   struct InitParam
   {
     ColorFormat videoColorFormat;
@@ -156,17 +155,17 @@ public:
   virtual bool IsPlaying() const   = 0;
   virtual bool Loop() const        = 0;
 
-  // ビデオデコーダコールバック
+  // Video decoder callback
   typedef std::function<void(char *dest, int pitch)> DestUpdater;
   typedef std::function<void(int w, int h, DestUpdater updater)> OnVideoDecoded;
   virtual void SetOnVideoDecoded(OnVideoDecoded callback) = 0;
 
-  // XXX Video にあわせたいれかえ検討
-  // オーディオデコーダコールバック
+  // XXX Considering replacement to match Video
+  // Audio decoder callback
   typedef int32_t (*OnAudioDecoded)(void *userPtr, const uint8_t *data, size_t sizeBytes);
-  // 出力オーディオ通知関数を取得する
-  // InitParam::useOwnAudioEngineがtrueの場合は、内部AudioEngine側にデータが
-  // 吸い上げられている状態で、外部には回せないようになっているので呼ばれない
+  // Get output audio notification function
+  // If InitParam::useOwnAudioEngine is true, data is sucked into internal AudioEngine
+  // and cannot be passed externally, so it is not called
   virtual void SetOnAudioDecoded(OnAudioDecoded func, void *userPtr) = 0;
 
   static IMoviePlayer *CreateMoviePlayer(const char *filename, InitParam &param);

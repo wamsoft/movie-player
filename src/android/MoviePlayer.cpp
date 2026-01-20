@@ -409,3 +409,14 @@ IMoviePlayer::CreateMoviePlayer(const char *filename, InitParam &param)
   delete player;
   return nullptr;
 }
+
+IMoviePlayer *
+IMoviePlayer::CreateMoviePlayer(IMovieReadStream *stream, InitParam &param)
+{
+  MoviePlayer *player = new MoviePlayer(param);
+  if (player->Open(stream)) {
+    return player;
+  }
+  delete player;
+  return nullptr;
+}

@@ -2,45 +2,44 @@
 
 WebM 動画再生ライブラリです
 
-# 状況
+# LICENSE
+
+このライブラリ自体は MIT License です。利用してるライブラリはそれぞれのライセンスに従ってください。
+
+# 実装概要
 
 細かい事項については各アーキテクチャごとに後ろの方に別項があるので参照してください。
 
 - Android
   - NDK の MediaExtractor+MediaCodec で対応
-- Windows
+
+- Windows (汎用実装)
   - nestegg + libvpx で cpu でのデコードで対応
   - miniaudio を内蔵して音声対応
   - CPU ベース処理で generic な作りなので、別アーキテクチャでも動作可能
     - `windows/` ディレクトリでやってるので、本格的に linux とか MacOS への対応する場合はディレクトリ名をなんか考えたい
-- Linux
-  - Windows コードでそのまま動作
-  - GUI の確認環境が現状手元にないので、movie_player_sample の動作は未確認
-  - **ビルド完走＋ movie_exporter で画像が出ることを確認**
-    - WSL 上で movie_player だと画面描画が更新されないが確認した WSL 環境での OpenGL の問題かも
-
-## 把握している問題
-
-- Windows
-  - pause/resume したときに、復帰後の数フレームがフレームスキップ扱いになる
-- Linux
-  - 確認した WSL 環境では movie_player_test での描画が正しく行われない
-
-## 最近の大きな変更
-
-- 動画取得処理は OnVideoDecoded の形に再修正
-- 生成時に指定したビデオフォーマットでのビットマップを書き戻しの形
-- ※ YUVテクスチャ処理が対応できてない。現在 ARBG 以外だと動作不良
-- GetVideoFrame() 系メソッドは廃止
-- 音声データも同様にできるように修正予定だが現状はまだ（音声は別スレッドから吸い上げる可能性が高い）
-- テストコードがあわせた修正ができてないので要対応
-
-- Video/Audio の情報取得が個別メソッドから `IMoviePlayer::GetVideoFormat()`、
-  `IMoviePlayer::GetAudioFormat()` に集約されています。
 
 ## 音声対応
 
-miniaudio での対応になります（AudioEngine.cpp）
+デフォルトは内臓された miniaudio で再生します（AudioEngine.cpp）
+
+cmake 時に MOVIEPLAYER_EXTERNAL_MINIAUDIO 指定の場合は、別途本体側でバージョンが合った miniaudio 実体を準備したうえで、
+以下の関数を準備する必要があります。
+
+```
+extern ma_engine *GetMiniAudioEngine();
+```
+
+cmake 時に MOVIEPLAYER_EXTERNAL_SDLAUDIO 指定の場合は SDL3 での再生になります。SDL3をあわせてリンクする必要があります。
+
+## 把握している問題
+
+- 共通
+  - pause/resume したときに、復帰後の数フレームがフレームスキップ扱いになる
+  - ※YUVテクスチャ処理がうまく対応できてない? 現在 ARBG 以外だと動作不良かも
+- Linux
+  - 確認した WSL 環境では movie_player_test での描画が正しく行われない
+
 
 # ディレクトリ構造
 
@@ -65,10 +64,13 @@ miniaudio での対応になります（AudioEngine.cpp）
 
 ### 利用方法
 
-`IMoviePlayer::CreateMoviePlayer(const char *filename, InitParam &param)`
-`IMoviePlayer::CreateMoviePlayer(IMovieReadStream *stream, InitParam &param)`
+```
+static IMoviePlayer *CreateMoviePlayer(const char *filename, InitParam &param);
 
-で、`IMoviePlayer`のインスタンスを作成して使用します。
+static IMoviePlayer *CreateMoviePlayer(IMovieReadStream *stream, InitParam &param);
+```
+
+`IMoviePlayer`のインスタンスを作成して使用します。
 `param.videoColorFormat` に出力したいカラーフォーマットを指定してください。
 
 それぞれ生成した後に、
@@ -96,6 +98,21 @@ Seek は最近傍の Cue ポイント(キーフレーム)へジャンプする�
 
 vcpkg + cmake の環境を想定しています。
 ルートの CMakeLists.txt を使用してビルドしてください。
+
+```bash
+# windows用
+cmake --preset x64-windows
+cmake --build build/x64-windows --config Release
+
+# linux
+cmake --preset x64-linux
+cmake --build build/x64-linux --config Release
+
+# android ライブラリだけビルドの場合
+# ※通常はプロジェクト側から直接 cmake 参照でビルドさせます
+cmake --preset arm64-android
+cmake --build build/arm64-android --config Release
+```
 
 ### テストコード
 
@@ -179,14 +196,13 @@ Windows 版は、実態としては Windows に依存するコードは含まな
 これにより Linux でのビルドについても一応対応してあります。
 
 ※WSL2(WSLg)環境で movie_player_test が動作することまでは確認していますが、
-描画が正しく行われていないのと、手元の WSLg 環境で音声出力できない状態のため
-動作確認までは行えていない状態です。
+描画が正しく行われてなくて調査中
 
 ※ソース類のディレクトリ名が`windows/`のまま参照しています。
 将来的には `generic/` とか `common/` とかあるいは `src/` 直下に展開とか
 なんかそういう感じに移動したいですが、暫定的にそのままのディレクトリ名です。
 
-以下、WSL2 の Ubuntu22.04 でライブラリ部をビルド確認した際の
+WSL2 の Ubuntu22.04 でライブラリ部をビルド確認した際の
 ステップバイステップの記録です。
 
 - vcpkg を導入する
@@ -227,28 +243,16 @@ MoviewPlayer のインスタンスごとにスレッドが生まれる感じに�
 
 ### 要求 API バージョン
 
-AMediaDataSource を扱う関係で API29 (Android 10.0) 以上を要求します。
-
-### ライブラリのビルド方法
-
-vcpkg + cmake の環境を想定しています。
-ルートの CMakeLists.txt を使用してビルドしてください
-
-```bash
-# windows用
-cmake --preset x64-windows
-# android 用
-cmake --preset arm64-android
-```
+AMediaDataSource 他を扱う関係で API29 (Android 10.0) 以上を要求します。
 
 ### テストプログラム
 
 `test/android` を AndroidStudio で開いてビルド、実行してください。
+cmake で直接トップフォルダを参照してビルドされます
 
 ### libyuv
 
-MediaCodec の出力は YUV なので RGB への間関に libyuv を導入してあります(`extlibs/libyuv`)。
+MediaCodec の出力は YUV なので RGB への変換に libyuv を導入してあります(`extlibs/libyuv`)。
 
 テストコードはエミュレータ(Pixel3)でのみ確認していますが
 実機だとなにか想定外のフォーマットで出力されてくる可能性があります。
-

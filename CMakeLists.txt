@@ -5,39 +5,39 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # ------------------------------------------------------------------------------
-# プロジェクト名設定
+# Project name setting
 # ------------------------------------------------------------------------------
 set(PROJ_NAME movieplayer)
 project(${PROJ_NAME})
 
 option(BUILD_TEST "build test programs" OFF)
-option(MOVIEPLAYER_EXTERNAL_SDL "use external sdl" OFF)
+option(MOVIEPLAYER_EXTERNAL_SDLAUDIO "use external sdl audio" OFF)
 option(MOVIEPLAYER_EXTERNAL_MINIAUDIO "use external miniaudio" OFF)
 
-if(MOVIEPLAYER_EXTERNAL_SDL)
+if(MOVIEPLAYER_EXTERNAL_SDLAUDIO)
 set(AUDIO_ENGINE_SOURCES src/common/AudioEngineSDL.cpp)
 else()
 set(AUDIO_ENGINE_SOURCES src/common/AudioEngine.cpp)
 endif()
 
 # ------------------------------------------------------------------------------
-# Win64チェック / 必ず project() 以後に呼ぶ
-#   ${CMAKE_GENERATOR_PLATFORM}はcmake実行時に-Aオプションで渡してやらないと
-#   入らないようなので、WIN32チェック＋ポインタサイズチェックで判定する
+# Win64 check / Must call after project()
+#   ${CMAKE_GENERATOR_PLATFORM} must be passed with -A option when running cmake
+#   since it doesn't seem to be set otherwise, determine by WIN32 check + pointer size check
 # ------------------------------------------------------------------------------
 if(WIN32 AND (CMAKE_SIZEOF_VOID_P EQUAL 8))
 set(WIN64 1)
 endif()
 
 # ------------------------------------------------------------------------------
-# 共通
+# Common
 # ------------------------------------------------------------------------------
 # for libyuv
-# if (TEST) の TEST を演算子とみなすかどうか。yuv では OPTION 変数として使ってるので
-# 一時的に OLD 動作に固定しておく。ポリシはサブに伝播しないのでデフォルトを変更している。
-# (yuv の CMakeLists.txt いじればいいのでは？ というのは、それはそう)
-#   Win64はSSE/AVXコードがVSビルドに対応していない関係でprebuildしたバイナリを
-#   参照するので、yuvのCMakeLists.txtは参照しない
+# Whether to consider TEST in if (TEST) as an operator. Since yuv uses it as an OPTION variable,
+# temporarily fix to OLD behavior. The policy does not propagate to subdirectories, so changing the default.
+# (Why not just edit yuv's CMakeLists.txt? Well, that's true.)
+#   Win64 refers to prebuilt binaries because SSE/AVX code does not support VS build,
+#   so yuv's CMakeLists.txt is not referenced.
 if(NOT WIN64)
 
 cmake_policy(GET CMP0064 pre_cmp0064)
@@ -69,7 +69,7 @@ target_compile_definitions(${PROJ_NAME} PUBLIC
 	INNER_AUDIOENGINE=1
 )
 
-if(MOVIEPLAYER_EXTERNAL_SDL)
+if(MOVIEPLAYER_EXTERNAL_SDLAUDIO)
 find_package(SDL3 REQUIRED)
 target_compile_definitions(${PROJ_NAME} PUBLIC
 	EXTERNAL_SDL=1
@@ -109,13 +109,13 @@ target_link_libraries(${PROJ_NAME} PUBLIC
 else()
 
 # ------------------------------------------------------------------------------
-# nestegg版対応アーキテクチャ共通
+# Common architecture supporting nestegg version
 # ------------------------------------------------------------------------------
 
 if(WIN32)
-# ※add_compile_options は add_library()/add_executable() の前に
-#   呼ぶ必要があるので、「共通」と言いつつこの指定だけはここへ配置
-# unicode 警告無視
+# * add_compile_options needs to be called before add_library()/add_executable(),
+#   so even though it's "common", this specification is placed here.
+# Ignore unicode warnings
 add_compile_options(/wd4819 /wd4244 /wd4267)
 endif()
 
@@ -140,7 +140,7 @@ target_compile_definitions(${PROJ_NAME} PUBLIC
 	INNER_AUDIOENGINE=1
 )
 
-if(MOVIEPLAYER_EXTERNAL_SDL)
+if(MOVIEPLAYER_EXTERNAL_SDLAUDIO)
 find_package(SDL3 REQUIRED)
 target_compile_definitions(${PROJ_NAME} PUBLIC
 	EXTERNAL_SDL=1
@@ -172,9 +172,9 @@ PRIVATE
 find_package(unofficial-libvpx CONFIG REQUIRED)
 target_link_libraries(${PROJ_NAME} PUBLIC unofficial::libvpx::libvpx)
 
-# libyuv(extlibs/配下のものを参照する)
-# SSE/AVX対応コードの64bitビルドはVSでは対応していないので、
-# clangで作成済みのバイナリをリンクする
+# libyuv (refer to the one under extlibs/)
+# Since 64-bit build of SSE/AVX capable code is not supported by VS,
+# link binaries already created with clang
 if(WIN64)
 message("*** Target is WIN64. Use prebuild libyuv-x64 binary. ***")
 find_library(LIBYUV_WIN64_DBG yuv_debug ${CMAKE_CURRENT_LIST_DIR}/extlibs/prebuild/win64)
