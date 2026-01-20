@@ -284,6 +284,7 @@ MoviePlayerCore::SetupAudioTrackPlayer(AMediaExtractor *ex)
             }
             return false;
         }, this, audioFormat, mAudioTrackPlayer->Channels(), mAudioTrackPlayer->SampleRate());
+        mAudioEngine->Start();
       }
 #endif
 

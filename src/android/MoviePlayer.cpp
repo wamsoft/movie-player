@@ -155,7 +155,7 @@ MoviePlayer::Open(IMovieReadStream *stream)
 bool
 MoviePlayer::Open(int fd, off_t offset, off_t length)
 {
-  mPlayer = new MoviePlayerCore();
+  mPlayer = new MoviePlayerCore(mInitParam.useOwnAudioEngine);
   mPlayer->SetPixelFormat(conv_color_format(mInitParam.videoColorFormat));
   return mPlayer->Open(fd, offset, length);
 }
