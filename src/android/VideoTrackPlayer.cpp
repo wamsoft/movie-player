@@ -262,7 +262,7 @@ VideoTrackPlayer::HandleOutputData(ssize_t bufIdx, AMediaCodecBufferInfo &bufInf
     // YUVのプレーンごとのストライドなどを取得する方法が見当たらないので
     // ソースプレーンがパディングされずに連続して配置されるものとして扱っている
     // 一部デバイスや特殊サイズムービーだとうまくいかない可能性あり
-    const uint8_t *yBuf = buf;
+    const uint8_t *yBuf = buf + bufInfo.offset;
     const uint8_t *uBuf = yBuf + mOutputWidth * mOutputHeight;
     const uint8_t *vBuf = uBuf + (mOutputWidth * mOutputHeight / 4);
     int32_t yStride     = mOutputWidth;

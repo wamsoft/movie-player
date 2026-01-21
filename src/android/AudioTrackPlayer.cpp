@@ -10,11 +10,6 @@ AudioTrackPlayer::AudioTrackPlayer(AMediaExtractor *ex, int32_t trackIndex,
 : TrackPlayer(ex, trackIndex, timer)
 , mOnAudioDecoded(nullptr)
 , mOnAudioDecodedUserPtr(nullptr)
-, mRingBuffer(nullptr)
-, mRingBufferSize(0)
-, mRingBufferWritePos(0)
-, mRingBufferReadPos(0)
-, mRingBufferDataSize(0)
 {
   Init();
 
@@ -63,9 +58,6 @@ AudioTrackPlayer::AudioTrackPlayer(AMediaExtractor *ex, int32_t trackIndex,
     mEncoding = kAudioEncodingPcm16bit;
   }
 
-  // リングバッファを初期化（2秒分）
-  InitRingBuffer();
-
   LOGV("audio duration=%lld, sampleRate=%d, channels=%d, bps=%d\n", mDuration,
        mSampleRate, mChannels, mBitsPerSample);
 }
@@ -87,110 +79,100 @@ AudioTrackPlayer::Init()
 
   mOnAudioDecoded        = nullptr;
   mOnAudioDecodedUserPtr = nullptr;
-
-  mRingBuffer = nullptr;
-  mRingBufferSize = 0;
-  mRingBufferWritePos = 0;
-  mRingBufferReadPos = 0;
-  mRingBufferDataSize = 0;
 }
 
 void
 AudioTrackPlayer::Done()
 {
-  if (mRingBuffer) {
-    delete[] mRingBuffer;
-    mRingBuffer = nullptr;
-  }
+  // キューに残っているバッファを全て解放
+  ReleaseAllBuffers();
 }
 
 void
-AudioTrackPlayer::InitRingBuffer()
+AudioTrackPlayer::EnqueueBuffer(ssize_t bufIdx, size_t offset, size_t size)
 {
-  if (mSampleRate > 0 && mChannels > 0 && mBitsPerSample > 0) {
-    // 2秒分のバッファサイズを計算
-    int32_t frameSize = (mBitsPerSample / 8) * mChannels;
-    int32_t framesFor2Sec = mSampleRate * 2;
-    mRingBufferSize = framesFor2Sec * frameSize;
-    
-    mRingBuffer = new uint8_t[mRingBufferSize];
-    mRingBufferWritePos = 0;
-    mRingBufferReadPos = 0;
-    mRingBufferDataSize = 0;
-    
-    LOGV("Ring buffer initialized: size=%d bytes (%d frames)\n", mRingBufferSize, framesFor2Sec);
-  }
+  std::lock_guard<std::mutex> lock(mBufferQueueMutex);
+  
+  AudioBufferItem item;
+  item.bufIdx = bufIdx;
+  item.offset = offset;
+  item.size = size;
+  item.readOffset = 0;
+  mBufferQueue.push(item);
 }
 
 void
-AudioTrackPlayer::WriteToRingBuffer(uint8_t* data, size_t size)
+AudioTrackPlayer::ReleaseAllBuffers()
 {
-  if (!mRingBuffer || size == 0) {
-    return;
+  std::lock_guard<std::mutex> lock(mBufferQueueMutex);
+  
+  while (!mBufferQueue.empty()) {
+    AudioBufferItem& item = mBufferQueue.front();
+    if (mCodec) {
+      AMediaCodec_releaseOutputBuffer(mCodec, item.bufIdx, false);
+    }
+    mBufferQueue.pop();
   }
-  
-  std::lock_guard<std::mutex> lock(mRingBufferMutex);
-  
-  size_t bytesToWrite = size;
-  size_t availableSpace = mRingBufferSize - mRingBufferDataSize;
-  
-  if (bytesToWrite > availableSpace) {
-    // バッファが満杯の場合は古いデータを上書き
-    bytesToWrite = availableSpace;
-    LOGV("Ring buffer overflow, truncating data\n");
-  }
-  
-  while (bytesToWrite > 0) {
-    size_t chunkSize = std::min(bytesToWrite, mRingBufferSize - mRingBufferWritePos);
-    memcpy(mRingBuffer + mRingBufferWritePos, data, chunkSize);
-    
-    mRingBufferWritePos = (mRingBufferWritePos + chunkSize) % mRingBufferSize;
-    mRingBufferDataSize += chunkSize;
-    data += chunkSize;
-    bytesToWrite -= chunkSize;
-  }
+  LOGV("All buffers released\n");
 }
 
 bool
 AudioTrackPlayer::ReadFromRingBuffer(uint8_t* buffer, uint64_t frameCount, uint64_t* framesRead)
 {
-  if (!mRingBuffer || frameCount == 0) {
+  if (frameCount == 0) {
     if (framesRead) *framesRead = 0;
     return false;
   }
   
-  std::lock_guard<std::mutex> lock(mRingBufferMutex);
+  std::lock_guard<std::mutex> lock(mBufferQueueMutex);
+  
+  if (mBufferQueue.empty()) {
+    if (framesRead) *framesRead = 0;
+    return false;
+  }
   
   int32_t frameSize = (mBitsPerSample / 8) * mChannels;
-  size_t bytesToRead = frameCount * frameSize;
-  size_t actualBytesToRead = std::min(bytesToRead, mRingBufferDataSize);
+  size_t bytesRequested = frameCount * frameSize;
+  size_t bytesWritten = 0;
   
-  uint64_t actualFramesToRead = actualBytesToRead / frameSize;
-  size_t actualBytesForFrames = actualFramesToRead * frameSize;
-  
-  if (actualFramesToRead == 0) {
-    if (framesRead) *framesRead = 0;
-    return false;
-  }
-  
-  size_t bytesRead = 0;
-  while (bytesRead < actualBytesForFrames) {
-    size_t chunkSize = std::min(actualBytesForFrames - bytesRead, mRingBufferSize - mRingBufferReadPos);
-    memcpy(buffer + bytesRead, mRingBuffer + mRingBufferReadPos, chunkSize);
+  while (bytesWritten < bytesRequested && !mBufferQueue.empty()) {
+    AudioBufferItem& item = mBufferQueue.front();
     
-    mRingBufferReadPos = (mRingBufferReadPos + chunkSize) % mRingBufferSize;
-    mRingBufferDataSize -= chunkSize;
-    bytesRead += chunkSize;
+    // AMediaCodecからバッファを取得
+    size_t bufSize;
+    uint8_t* buf = AMediaCodec_getOutputBuffer(mCodec, item.bufIdx, &bufSize);
+    if (!buf) {
+      // バッファ取得失敗の場合はこのアイテムをスキップ
+      AMediaCodec_releaseOutputBuffer(mCodec, item.bufIdx, false);
+      mBufferQueue.pop();
+      continue;
+    }
+    
+    // このバッファから読み取れるバイト数
+    size_t remainingInBuffer = item.size - item.readOffset;
+    size_t bytesToCopy = std::min(remainingInBuffer, bytesRequested - bytesWritten);
+    
+    memcpy(buffer + bytesWritten, buf + item.offset + item.readOffset, bytesToCopy);
+    bytesWritten += bytesToCopy;
+    item.readOffset += bytesToCopy;
+    
+    // バッファを全て読み切ったら解放
+    if (item.readOffset >= item.size) {
+      AMediaCodec_releaseOutputBuffer(mCodec, item.bufIdx, false);
+      mBufferQueue.pop();
+    }
   }
+  
+  uint64_t actualFramesRead = bytesWritten / frameSize;
   
   // 不足分をゼロで埋める
-  if (actualFramesToRead < frameCount) {
-    size_t remainingBytes = (frameCount - actualFramesToRead) * frameSize;
-    memset(buffer + actualBytesForFrames, 0, remainingBytes);
+  if (actualFramesRead < frameCount) {
+    size_t remainingBytes = (frameCount - actualFramesRead) * frameSize;
+    memset(buffer + bytesWritten, 0, remainingBytes);
   }
   
-  if (framesRead) *framesRead = actualFramesToRead;
-  return actualFramesToRead > 0;
+  if (framesRead) *framesRead = actualFramesRead;
+  return actualFramesRead > 0;
 }
 
 int32_t
@@ -303,43 +285,40 @@ AudioTrackPlayer::HandleOutputData(ssize_t bufIdx, AMediaCodecBufferInfo &bufInf
                                    int32_t flags)
 {
   if (bufInfo.size > 0) {
-    size_t bufSize;
-    uint8_t *buf = AMediaCodec_getOutputBuffer(mCodec, bufIdx, &bufSize);
-
-    // オーディオは片っ端から送って、先方で順次再生バッファに詰めてもらう形で
-    // 問題ない？
-#if 0 
-    // このフレームのPTSをタイマーに反映
-    int64_t mediaTimeUs = bufInfo.presentationTimeUs;
-    if (!mClock->IsStarted()) {
-      mClock->SetStartTime(mediaTimeUs);
-    }
-    mClock->SetCurrentMediaTime(mediaTimeUs);
-
-    // PTSが未来の場合は反映を待ち合わせる
-    int64_t renderDelay = mClock->CalcDelay(mediaTimeUs);
-    if (renderDelay > 0) {
-      // LOGV("render delay sleep: %lld us \n", renderDelay);
-      std::this_thread::sleep_for(std::chrono::microseconds(renderDelay));
-    }
-#endif
-
     // 出力バッファの内容をハンドラに返す
     if (mOnAudioDecoded != nullptr) {
-      mOnAudioDecoded(mOnAudioDecodedUserPtr, buf, bufSize);
+      size_t bufSize;
+      uint8_t *buf = AMediaCodec_getOutputBuffer(mCodec, bufIdx, &bufSize);
+      mOnAudioDecoded(mOnAudioDecodedUserPtr, buf + bufInfo.offset, bufInfo.size);
+      // output buffer を開放
+      AMediaCodec_releaseOutputBuffer(mCodec, bufIdx, false);
     } else {
-      // コールバックが設定されていない場合はリングバッファにデータを格納
-      WriteToRingBuffer(buf, bufInfo.size);
+      // コールバックが設定されていない場合はbufIdxをキューに追加
+      // バッファの解放はReadFromRingBufferで行う
+      EnqueueBuffer(bufIdx, bufInfo.offset, bufInfo.size);
     }
+  }
 
-#if 0 // DEBUG
-    LOGV("audio output: id: %zu  size: %d  pts: %lld flags: %d", bufidx, info.size,
-         mediaTimeUs, info.flags);
+  // オーディオは片っ端から送って、先方で順次再生バッファに詰めてもらう形で
+  // 問題ない？
+#if 0 
+  // このフレームのPTSをタイマーに反映
+  int64_t mediaTimeUs = bufInfo.presentationTimeUs;
+  if (!mClock->IsStarted()) {
+    mClock->SetStartTime(mediaTimeUs);
+  }
+  mClock->SetCurrentMediaTime(mediaTimeUs);
+
+  //LOGV("audio output: id: %zu  size: %d  pts: %lld flags: %d", bufidx, info.size, mediaTimeUs, info.flags);
+
+  // PTSが未来の場合は反映を待ち合わせる
+  int64_t renderDelay = mClock->CalcDelay(mediaTimeUs);
+  if (renderDelay > 0) {
+    // LOGV("render delay sleep: %lld us \n", renderDelay);
+    std::this_thread::sleep_for(std::chrono::microseconds(renderDelay));
+  }
 #endif
 
-    // output buffer を開放
-    AMediaCodec_releaseOutputBuffer(mCodec, bufIdx, false);
-  }
 }
 
 void

@@ -2,6 +2,7 @@
 
 #include "TrackPlayer.h"
 #include <mutex>
+#include <queue>
 
 // -----------------------------------------------------------------------------
 // オーディオトラックプレイヤ
@@ -9,6 +10,14 @@
 
 // オーディオデコーダコールバック
 typedef int32_t (*OnAudioDecoded)(void *userPtr, const uint8_t *data, size_t sizeBytes);
+
+// バッファキューアイテム
+struct AudioBufferItem {
+  ssize_t bufIdx;         // AMediaCodecのバッファインデックス
+  size_t offset;          // バッファ内のデータ開始オフセット
+  size_t size;            // バッファのデータサイズ
+  size_t readOffset;      // 読み出し済みオフセット
+};
 
 class AudioTrackPlayer : public TrackPlayer
 {
@@ -48,16 +57,12 @@ private:
   OnAudioDecoded mOnAudioDecoded;
   void *mOnAudioDecodedUserPtr;
 
-  // リングバッファ関連
-  uint8_t* mRingBuffer;
-  size_t mRingBufferSize;
-  size_t mRingBufferWritePos;
-  size_t mRingBufferReadPos;
-  size_t mRingBufferDataSize;
-  std::mutex mRingBufferMutex;
+  // バッファキュー関連
+  std::queue<AudioBufferItem> mBufferQueue;  // bufIdxのキュー
+  std::mutex mBufferQueueMutex;
 
-  // リングバッファ初期化
-  void InitRingBuffer();
-  // リングバッファへのデータ書き込み
-  void WriteToRingBuffer(uint8_t* data, size_t size);
+  // バッファをキューに追加
+  void EnqueueBuffer(ssize_t bufIdx, size_t offset, size_t size);
+  // キューに残っているバッファを全て解放
+  void ReleaseAllBuffers();
 };
