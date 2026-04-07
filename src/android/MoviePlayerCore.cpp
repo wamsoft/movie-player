@@ -195,7 +195,9 @@ MoviePlayerCore::CreateExtractor(IMovieReadStream *stream)
     if (err != AMEDIA_OK) {
       LOGE("setDataSource error: %d", err);
       AMediaExtractor_delete(ex);
+#if __ANDROID_API__ >= 29
       AMediaDataSource_close(dataSource); // 失敗時にデータソースを開放
+#endif
       AMediaDataSource_delete(dataSource); // メモリ解放
       return nullptr;
     }
