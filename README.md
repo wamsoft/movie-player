@@ -15,22 +15,17 @@ WebM 動画再生ライブラリです
 
 - Windows (汎用実装)
   - nestegg + libvpx で cpu でのデコードで対応
-  - miniaudio を内蔵して音声対応
   - CPU ベース処理で generic な作りなので、別アーキテクチャでも動作可能
     - `windows/` ディレクトリでやってるので、本格的に linux とか MacOS への対応する場合はディレクトリ名をなんか考えたい
 
 ## 音声対応
 
-デフォルトは内臓された miniaudio で再生します（AudioEngine.cpp）
+音声出力はライブラリ内部では行わず、host 側が `IAudioSink` を実装して
+`IMoviePlayer::InitParam::audioSink` に渡す形に統一されています
+(Windows / Linux / macOS / Android すべて同じ)。`audioSink` が `nullptr` の
+場合は音声無しで再生します。
 
-cmake 時に MOVIEPLAYER_EXTERNAL_MINIAUDIO 指定の場合は、別途本体側でバージョンが合った miniaudio 実体を準備したうえで、
-以下の関数を準備する必要があります。
-
-```
-extern ma_engine *GetMiniAudioEngine();
-```
-
-cmake 時に MOVIEPLAYER_EXTERNAL_SDLAUDIO 指定の場合は SDL3 での再生になります。SDL3をあわせてリンクする必要があります。
+`IAudioSink` のインタフェースは `include/IAudioSink.h` を参照してください。
 
 ## 把握している問題
 
@@ -143,7 +138,6 @@ cmake --build build/arm64-android --config Release
 - libopus / vcpkg / Windows 版のみ
 - libyuv / 自前(`extlibs/`のもの)
 - nestegg / 自前(`extlibs/`のもの) / Windows 版のみ
-- miniaudio / vcpkg
 
 なるべく vcpkg で揃える方針で作業しています。
 libyuv については、他アーキテクチャの対応もありどのみち自前で抱えているので、

@@ -12,7 +12,7 @@ project(${PROJ_NAME})
 
 option(BUILD_TEST "build test programs" OFF)
 # 音声出力は Windows/Linux/macOS/Android すべての経路で host が IAudioSink を
-# 実装して渡す形に統一されているので、内部 AudioEngine 系のオプションは廃止。
+# 実装して InitParam::audioSink に渡す形に統一されている。
 
 # ------------------------------------------------------------------------------
 # Win64 check / Must call after project()
@@ -57,9 +57,6 @@ add_library(${PROJ_NAME} STATIC
 	src/android/MoviePlayerCore.cpp
 	src/android/MoviePlayer.cpp
 	)
-
-# audio 出力は host が IAudioSink を実装して InitParam.audioSink に渡す。
-# 内部 AudioEngine は持たない。
 
 target_include_directories(${PROJ_NAME}
 PUBLIC
@@ -108,9 +105,6 @@ add_library(${PROJ_NAME} STATIC
 	src/windows/MoviePlayer.cpp
 	extlibs/nestegg/src/nestegg.c
 )
-
-# audio 出力は host が IAudioSink を実装して InitParam.audioSink に渡す。
-# 内部 AudioEngine は持たない (Android 版のみ持つ)。
 
 target_include_directories(${PROJ_NAME}
 PUBLIC

@@ -1,9 +1,7 @@
 {
   "name": "movieplayer",
   "version": "1.0.0",
-  "dependencies": [
-    "miniaudio"
-  ],
+  "dependencies": [],
   "builtin-baseline": "f26ec398c25c4980f33a50391f00a75f7ad62ef7",
   "vcpkg-configuration": {
     "registries": [

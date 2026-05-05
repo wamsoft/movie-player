@@ -95,7 +95,6 @@ main(int argc, char *argv[])
   // MoviePlayer を作成
   IMoviePlayer::InitParam param;
   param.Init();
-  // param.useOwnAudioEngine = false; // アプリ側でオーディオエンジンを持つ場合false
 #if defined(TEST_PRE_CONV_YUV) && !defined(TEST_DIB_MODE)
   // デコード時にYUV>BGR変換まで行う
   param.videoColorFormat = IMoviePlayer::COLOR_BGRA;

@@ -25,8 +25,7 @@
     {
       "name": "glfw3",
       "platform": "!android"
-    },
-    "miniaudio"
+    }
   ],
   "builtin-baseline": "f26ec398c25c4980f33a50391f00a75f7ad62ef7",
   "vcpkg-configuration": {
