@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+
+class IAudioSink;
+
 class IMovieReadStream {
 public:
     virtual int AddRef(void) = 0;
@@ -113,11 +116,12 @@ public:
   struct InitParam
   {
     ColorFormat videoColorFormat;
-    bool useOwnAudioEngine;
+    // audio 出力先。host が用意して渡す。nullptr の場合は audio 無しで再生。
+    IAudioSink *audioSink;
     void Init()
     {
-      videoColorFormat  = COLOR_UNKNOWN;
-      useOwnAudioEngine = true;
+      videoColorFormat = COLOR_UNKNOWN;
+      audioSink        = nullptr;
     }
   };
 
@@ -160,13 +164,8 @@ public:
   typedef std::function<void(int w, int h, DestUpdater updater)> OnVideoDecoded;
   virtual void SetOnVideoDecoded(OnVideoDecoded callback) = 0;
 
-  // XXX Considering replacement to match Video
-  // Audio decoder callback
-  typedef int32_t (*OnAudioDecoded)(void *userPtr, const uint8_t *data, size_t sizeBytes);
-  // Get output audio notification function
-  // If InitParam::useOwnAudioEngine is true, data is sucked into internal AudioEngine
-  // and cannot be passed externally, so it is not called
-  virtual void SetOnAudioDecoded(OnAudioDecoded func, void *userPtr) = 0;
+  // 音声出力は InitParam::audioSink (IAudioSink*) を経由する。
+  // SetOnAudioDecoded API は撤去された。
 
   static IMoviePlayer *CreateMoviePlayer(const char *filename, InitParam &param);
 

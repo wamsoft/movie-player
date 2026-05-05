@@ -40,14 +40,9 @@ public:
   virtual bool IsPlaying() const override;
   virtual bool Loop() const override;
 
-  bool GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
-                             uint64_t *timeStampUs);
-
   virtual void SetOnState(OnState func, void *userPtr);
 
   virtual void SetOnVideoDecoded(OnVideoDecoded callback);
-
-  virtual void SetOnAudioDecoded(OnAudioDecoded func, void *userPtr);
 
 private:
   void Init();

@@ -2,34 +2,16 @@
 #include "BasicLog.h"
 #include "MoviePlayerCore.h"
 
-#include "AudioEngine.h"
+#include "IAudioSink.h"
 #include "IMoviePlayer.h"
 
-// 静的コールバック関数を追加
-static bool AudioDataCallback(void* userData, uint8_t* buffer, uint64_t frameCount, uint64_t* framesRead)
-{
-  MoviePlayerCore* player = static_cast<MoviePlayerCore*>(userData);
-  if (player) {
-    return player->GetAudioFrame(buffer, frameCount, framesRead, nullptr);
-  }
-  return false;
-}
-
-MoviePlayerCore::MoviePlayerCore(PixelFormat pixelFormat, bool useAudioEngine)
+MoviePlayerCore::MoviePlayerCore(PixelFormat pixelFormat, IAudioSink *audioSink)
 : mState(STATE_UNINIT)
 , mPixelFormat(pixelFormat)
-#ifdef INNER_AUDIOENGINE
-, mAudioEngine(nullptr)
-#endif
+, mAudioSink(audioSink)
 , mOnStateFunc(nullptr)
-, mOnAudioDecodedFunc(nullptr)
 , mOnVideoDecodedFunc(nullptr)
 {
-#ifdef INNER_AUDIOENGINE
-  if (useAudioEngine) {
-    mAudioEngine = CreateAudioEngine();
-  }
-#endif
   Init();
 }
 
@@ -65,12 +47,11 @@ MoviePlayerCore::Init()
   mVideoFrameLastGet            = nullptr;
   mDummyFrame.InitByType(TRACK_TYPE_VIDEO, -1);
 
-  mAudioDataPos           = 0;
   mAudioUnitSize          = 0;
-  mAudioOutputFrames      = 0;
   mAudioCodecDelayUs      = 0;
+  mAudioStartPtsNs        = 0;
+  mAudioStartPtsValid     = false;
   mAudioResumeMediaTimeUs = 0;
-  mAudioTime.Reset();
 }
 
 void
@@ -97,13 +78,8 @@ MoviePlayerCore::Done()
   Flush();
   StopThread();
 
-#ifdef INNER_AUDIOENGINE
-  if (mAudioEngine) {
-    mAudioEngine->Done();
-    delete mAudioEngine;
-    mAudioEngine = nullptr;
-  }
-#endif
+  // mAudioSink は host 所有なので touch しない (ここでは Stop も含めない;
+  // host 側が VideoOverlay close 時に責任を持つ)
 
   if (mVideoDecoder) {
     mVideoDecoder->Stop();
@@ -122,8 +98,7 @@ MoviePlayerCore::Done()
     mExtractor = nullptr;
   }
 
-  mOnStateFunc = nullptr;
-  mOnAudioDecodedFunc = nullptr;
+  mOnStateFunc        = nullptr;
   mOnVideoDecodedFunc = nullptr;
 }
 
@@ -412,12 +387,23 @@ MoviePlayerCore::SelectTargetTrack()
         break;
       }
 
-#ifdef INNER_AUDIOENGINE
-      // 自前オーディオ再生の場合はAudioEngineを初期化する
-      if (mAudioEngine != nullptr) {
-        mAudioEngine->Init(AudioDataCallback, this, audioFormat, info.a.channels, info.a.sampleRate);
+      // 外部 audio sink にフォーマットを通知。失敗したら audio 無し再生に切替。
+      if (mAudioSink != nullptr) {
+        IAudioSink::Encoding encoding = IAudioSink::PCM_S16;
+        switch (audioFormat) {
+        case AUDIO_FORMAT_U8:  encoding = IAudioSink::PCM_U8;  break;
+        case AUDIO_FORMAT_S16: encoding = IAudioSink::PCM_S16; break;
+        case AUDIO_FORMAT_S32: encoding = IAudioSink::PCM_S32; break;
+        case AUDIO_FORMAT_F32: encoding = IAudioSink::PCM_F32; break;
+        default: break;
+        }
+        int32_t bitsPerSample = mAudioUnitSize * 8 / info.a.channels;
+        if (!mAudioSink->Setup(info.a.channels, (int)info.a.sampleRate,
+                               bitsPerSample, encoding)) {
+          LOGE("audio sink setup failed; disabling audio output\n");
+          mAudioSink = nullptr;
+        }
       }
-#endif
 
       mExtractor->SelectTrack(TRACK_TYPE_AUDIO, i);
 
@@ -642,15 +628,9 @@ MoviePlayerCore::HandleAudioOutput()
     return;
   }
 
-  // audio thread が consumed 通知用 ring に積んだ bufIndex を release。
-  // (audio callback コンテキストから ReleaseDecodedBufferIndex を直接呼ばず、
-  //  decoder thread であるここで肩代わりするためのもの)
-  {
-    int32_t bufIndex = -1;
-    while (mAudioReleasedRing.TryPop(bufIndex)) {
-      mAudioDecoder->ReleaseDecodedBufferIndex(bufIndex);
-    }
-  }
+  // sink が再生完了通知を返してきた DecodedBuffer を引き取り、
+  // 同時に sink->GetSamplesPlayed をベースに MediaClock を更新する。
+  DrainAudioSinkConsumed();
 
   if (mSawAudioOutputEOS) {
     return;
@@ -740,14 +720,12 @@ MoviePlayerCore::HandleMessage(int32_t what, int64_t arg, void *data)
       mClock.ClearStartMediaTime();
 
       if (IsAudioAvailable()) {
-        mAudioOutputFrames = 0;
+        // sink->GetSamplesPlayed の起点が変わるので start PTS を仕切り直す。
+        // 次に enqueue されるバッファの PTS が新しい起点になる。
+        mAudioStartPtsValid = false;
 
-        // audio有効時のメディアクロック更新はGetAudioFrame()からなので
-        // 非同期アクセスが起点となり、ビデオフレームの更新確認時に初回更新が
-        // かかってない可能性がある。そのため、ここで前回の最終タイムを使用して
-        // start/anchorに更新をかけておく。
-        // 非同期アクセスの保護は audio frame用の mutex を借りる
-        std::lock_guard<std::mutex> lock(mAudioFrameMutex);
+        // sink からのクロック更新が走る前に video が描画判定を走ら
+        // せる可能性に備えて、前回の最終タイムで start/anchor を初期化。
         mClock.SetStartMediaTime(mAudioResumeMediaTimeUs);
         mClock.SetPresentationTime(mAudioResumeMediaTimeUs);
         mClock.UpdateAnchorTime(mAudioResumeMediaTimeUs, get_time_us(), INT64_MAX);
@@ -820,24 +798,22 @@ MoviePlayerCore::Flush()
 
   mVideoFrameLastGet = nullptr;
 
-  // オーディオ出力待ちキューをフラッシュ＆ステータス類をリセット
+  // オーディオ出力待ちをフラッシュ
   if (mAudioDecoder != nullptr) {
-    std::lock_guard<std::mutex> lock(mAudioFrameMutex);
-    // pending ring を全部 release。Flush は decoder thread (= ReleaseDecodedBufferIndex
-    // の正規 caller スレッド) から呼ばれるので直接呼んで良い。
-    while (DecodedBuffer **front = mAudioFrameRing.TryPeek()) {
-      mAudioDecoder->ReleaseDecodedBufferIndex((*front)->bufIndex);
-      mAudioFrameRing.AdvancePop();
+    if (mAudioSink) {
+      // pending を全て consumed に流して取り出す。
+      mAudioSink->Flush();
+      void *param = nullptr;
+      while (mAudioSink->TryPopConsumed(&param)) {
+        DecodedBuffer *buf = (DecodedBuffer *)param;
+        if (buf) {
+          mAudioDecoder->ReleaseDecodedBufferIndex(buf->bufIndex);
+        }
+      }
     }
-    // audio thread が書き込んだ released ring も使い切る (ここで release は無害)
-    int32_t bufIndex = -1;
-    while (mAudioReleasedRing.TryPop(bufIndex)) {
-      mAudioDecoder->ReleaseDecodedBufferIndex(bufIndex);
-    }
-    mAudioDataPos           = 0;
-    mAudioOutputFrames      = 0;
+    mAudioStartPtsValid     = false;
+    mAudioStartPtsNs        = 0;
     mAudioResumeMediaTimeUs = 0;
-    mAudioTime.Reset();
   }
 
   // デコーダ類をフラッシュ
@@ -957,82 +933,25 @@ MoviePlayerCore::CalcDiffVideoTimeAndNow(DecodedBuffer *targetFrame) const
 void
 MoviePlayerCore::EnqueueAudio(DecodedBuffer *data)
 {
-  std::lock_guard<std::mutex> lock(mAudioFrameMutex);
-
-  if (mOnAudioDecodedFunc) {
-
-    uint64_t readFrames = 0;
-    int64_t mediaTimeUs = 0;
-
-    uint64_t timeBase     = mAudioTime.base;
-    uint64_t outputFrames = mAudioTime.outputFrames;
-    uint64_t nextOutputFrames = outputFrames;
-    uint64_t nextTimeBase     = 0;
-
-    mOnAudioDecodedFunc(data->data, data->dataSize);
-
-    mAudioDecoder->ReleaseDecodedBufferIndex(data->bufIndex);
-
-    // 時刻計算処理
-
-    if (timeBase != data->timeStampNs) {
-      timeBase         = data->timeStampNs;
-      outputFrames     = 0;
-      nextOutputFrames = 0;
-    }
-    nextTimeBase = data->timeStampNs;
-
-    uint64_t frames = data->dataSize / mAudioUnitSize;
-    readFrames += frames;
-    nextOutputFrames += frames;
-
-    // EOSバッファはフラグのみの空バッファなので打ち切り
+  if (mAudioSink == nullptr) {
+    // audio 無し再生。decoder buffer は即時 release。
     if (data->isEndOfStream) {
-      // LOGV("audio last frame END\n");
       mLastAudioFrameEnd = true;
     }
-
-    // 現状では、ここが呼ばれた時点でそこまでの送出フレームが
-    // 再生されきった状態とみなす。より正確にするには、使用している
-    // オーディオエンジンの現在の再生位置を取得する必要がある。
-    int64_t sampleRate = mAudioDecoder->SampleRate();
-    int64_t timeOffset = calc_audio_duration_us(outputFrames, sampleRate);
-    mediaTimeUs        = ns_to_us(timeBase) + timeOffset - mAudioCodecDelayUs;
-    if (mediaTimeUs >= 0) {
-      if (!mClock.IsStarted()) {
-        mClock.SetStartMediaTime(mediaTimeUs);
-      }
-      mClock.SetPresentationTime(mediaTimeUs);
-
-      int64_t durationUs     = calc_audio_duration_us(readFrames, sampleRate);
-      int64_t maxMediaTimeUs = mediaTimeUs + durationUs;
-      int64_t nowUs          = get_time_us();
-      int64_t nowMediaUs     = mClock.GetStartMediaTime() +
-                           calc_audio_duration_us(mAudioOutputFrames, sampleRate);
-      mClock.UpdateAnchorTime(nowMediaUs, nowUs, maxMediaTimeUs);
-
-      // resumu時に最速でstart/anchorを復帰するために再生終了時点のPTSを保存
-      mAudioResumeMediaTimeUs = maxMediaTimeUs;
-    } else {
-      // negative timeはpresentationしてはいけないとmkv仕様書に記載なので読み捨て
-      // (作り上すでにメモリコピーしちゃってるけど、framesReadをいじって対応)
-      readFrames  = 0;
-      // LOGV("* negative pts *\n");
-    }
-
-    mAudioTime.base         = nextTimeBase;
-    mAudioTime.outputFrames = nextOutputFrames;
-
-    mAudioOutputFrames += readFrames;
-
-  } else {
-    if (!mAudioFrameRing.TryPush(data)) {
-      // 容量を超えた (基本起こらないがフォールバックとして即時 release)
-      LOGE("audio frame ring full, dropping decoded buffer (bufIndex=%d)\n",
-           data->bufIndex);
+    if (mAudioDecoder) {
       mAudioDecoder->ReleaseDecodedBufferIndex(data->bufIndex);
     }
+    return;
   }
+
+  // sink にデータを流す。data ポインタは consumed 通知が返るまで有効である必要が
+  // あり、DecodedBuffer 自体の寿命は decoder の管理下にある (ReleaseDecodedBufferIndex
+  // を呼ぶまで安定)。consumed 時にここから ReleaseDecodedBufferIndex を呼ぶ。
+  if (!mAudioStartPtsValid) {
+    mAudioStartPtsNs    = data->timeStampNs;
+    mAudioStartPtsValid = true;
+  }
+  mAudioSink->Enqueue(data->data, data->dataSize, data->isEndOfStream, data);
 }
 
 void
@@ -1049,161 +968,54 @@ MoviePlayerCore::EnqueueVideo(DecodedBuffer *data)
   }
 }
 
-bool
-MoviePlayerCore::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
-                               uint64_t *timeStampUs)
+void
+MoviePlayerCore::DrainAudioSinkConsumed()
 {
-  bool hasNewFrame    = false;
-  uint64_t readFrames = 0;
-  int64_t mediaTimeUs = 0;
-
-  if (IsAudioAvailable()) {
-    std::lock_guard<std::mutex> lock(mAudioFrameMutex);
-
-    // プリロード中と完走後にリセットされるまでの期間は出力を行わない
-    if (IsCurrentState(STATE_PRELOADING) || mLastAudioFrameEnd) {
-      readFrames  = 0;
-      hasNewFrame = false;
-      goto out;
-    }
-
-    uint64_t reqBytes     = frameCount * mAudioUnitSize;
-    uint8_t *dst          = frames;
-    uint64_t bytesToRead  = reqBytes;
-    uint64_t timeBase     = mAudioTime.base;
-    uint64_t outputFrames = mAudioTime.outputFrames;
-
-    uint64_t nextOutputFrames = outputFrames;
-    uint64_t nextTimeBase     = 0;
-
-    bool first = true;
-    while (bytesToRead > 0) {
-      DecodedBuffer **front = mAudioFrameRing.TryPeek();
-      if (!front) {
-        break;
-      }
-      DecodedBuffer *data = *front;
-
-      // EOSバッファはフラグのみの空バッファなので打ち切り
-      if (data->isEndOfStream) {
-        // LOGV("audio last frame END\n");
-        mLastAudioFrameEnd = true;
-        break;
-      }
-
-      if (first) {
-        // 初回のみ前回からバッファのPTSが変わってる場合にbase更新
-        if (timeBase != data->timeStampNs) {
-          timeBase         = data->timeStampNs;
-          outputFrames     = 0;
-          nextOutputFrames = 0;
-        }
-        first = false;
-      } else {
-        // 初回以外でPTSが変わっていればnextOutputFramesをリセット
-        if (nextTimeBase != data->timeStampNs) {
-          nextOutputFrames = 0;
-        }
-      }
-      nextTimeBase = data->timeStampNs;
-
-      uint64_t frames = 0;
-      int remain      = data->dataSize - mAudioDataPos;
-      if (bytesToRead < remain) {
-        memcpy(dst, data->data + mAudioDataPos, bytesToRead);
-        dst += bytesToRead;
-        frames = (bytesToRead / mAudioUnitSize);
-        mAudioDataPos += bytesToRead;
-        bytesToRead = 0;
-      } else {
-        memcpy(dst, data->data + mAudioDataPos, remain);
-        // ReleaseDecodedBufferIndex は内部で mutex + Post (cv_signal) を踏むので
-        // audio callback コンテキストでは呼ばず、released ring に bufIndex を
-        // 積んで decoder thread (Decode ループ) で release する。
-        if (!mAudioReleasedRing.TryPush(data->bufIndex)) {
-          // 容量超え時のみ仕方なく直接 release する (理論上起こらない)
-          mAudioDecoder->ReleaseDecodedBufferIndex(data->bufIndex);
-        }
-        mAudioFrameRing.AdvancePop();
-        dst += remain;
-        frames = (remain / mAudioUnitSize);
-        bytesToRead -= remain;
-        mAudioDataPos = 0;
-      }
-      readFrames += frames;
-      nextOutputFrames += frames;
-    }
-    hasNewFrame = true;
-
-    // 最終かつ読み込みが0フレームだった場合(ちょうどEOSバッファだけ残った場合)
-    // メディアクロック系は触らずにすぐ戻る
-    if (mLastAudioFrameEnd && readFrames == 0) {
-      readFrames  = 0;
-      hasNewFrame = false;
-      goto out;
-    }
-
-    // 不足分は無音で埋める
-    // TODO S16以外では無音が0でない可能性がある。S16以外に対応する場合は注意
-    if (bytesToRead > 0) {
-      memset(dst, 0, bytesToRead);
-      readFrames += (bytesToRead / mAudioUnitSize);
-      ASSERT(readFrames == frameCount, "BUG: invalid audio frame count.\n");
-    }
-
-    // 現状では、ここが呼ばれた時点でそこまでの送出フレームが
-    // 再生されきった状態とみなす。より正確にするには、使用している
-    // オーディオエンジンの現在の再生位置を取得する必要がある。
-    int64_t sampleRate = mAudioDecoder->SampleRate();
-    int64_t timeOffset = calc_audio_duration_us(outputFrames, sampleRate);
-    mediaTimeUs        = ns_to_us(timeBase) + timeOffset - mAudioCodecDelayUs;
-    if (mediaTimeUs >= 0) {
-      if (!mClock.IsStarted()) {
-        mClock.SetStartMediaTime(mediaTimeUs);
-      }
-      mClock.SetPresentationTime(mediaTimeUs);
-
-      int64_t durationUs     = calc_audio_duration_us(readFrames, sampleRate);
-      int64_t maxMediaTimeUs = mediaTimeUs + durationUs;
-      int64_t nowUs          = get_time_us();
-      int64_t nowMediaUs     = mClock.GetStartMediaTime() +
-                           calc_audio_duration_us(mAudioOutputFrames, sampleRate);
-      mClock.UpdateAnchorTime(nowMediaUs, nowUs, maxMediaTimeUs);
-
-      // resumu時に最速でstart/anchorを復帰するために再生終了時点のPTSを保存
-      mAudioResumeMediaTimeUs = maxMediaTimeUs;
-    } else {
-      // negative timeはpresentationしてはいけないとmkv仕様書に記載なので読み捨て
-      // (作り上すでにメモリコピーしちゃってるけど、framesReadをいじって対応)
-      readFrames  = 0;
-      hasNewFrame = false;
-      // LOGV("* negative pts *\n");
-    }
-
-    mAudioTime.base         = nextTimeBase;
-    mAudioTime.outputFrames = nextOutputFrames;
-
-#if 0 // DEBUG
-    LOGV("time=%" PRId64 ", base=%" PRId64 ", offset=%" PRId64 "\n", mediaTimeUs,
-         ns_to_us(timeBase), timeOffset);
-#endif
-  } else {
-    // 音声トラックがない
-    readFrames  = 0;
-    hasNewFrame = false;
+  // sink が再生完了 (consumed) 通知した DecodedBuffer を引き取り、
+  // ・decoder buffer を release
+  // ・EOS マーカー検出で mLastAudioFrameEnd セット
+  // を行う。本メソッドは decoder thread (Decode ループ) から呼ばれる。
+  if (mAudioSink == nullptr || mAudioDecoder == nullptr) {
+    return;
   }
 
-out:
-  mAudioOutputFrames += readFrames;
-  if (framesRead) {
-    *framesRead = readFrames;
+  void *param = nullptr;
+  while (mAudioSink->TryPopConsumed(&param)) {
+    DecodedBuffer *buf = (DecodedBuffer *)param;
+    if (!buf) continue;
+    if (buf->isEndOfStream) {
+      mLastAudioFrameEnd = true;
+    }
+    mAudioDecoder->ReleaseDecodedBufferIndex(buf->bufIndex);
   }
 
-  if (timeStampUs) {
-    *timeStampUs = mediaTimeUs;
+  // sink が報告する再生済み frame 数で MediaClock を anchor 更新する。
+  // (起点 PTS = 最初に enqueue したバッファの PTS、線形仮定)
+  if (!IsAudioAvailable() || !mAudioStartPtsValid || mLastAudioFrameEnd) {
+    return;
   }
+  if (IsCurrentState(STATE_PRELOADING)) {
+    return;
+  }
+  int64_t sampleRate = mAudioDecoder->SampleRate();
+  if (sampleRate <= 0) return;
 
-  return hasNewFrame;
+  int64_t samplesPlayed = mAudioSink->GetSamplesPlayed();
+  int64_t playedUs      = calc_audio_duration_us(samplesPlayed, sampleRate);
+  int64_t mediaTimeUs   = ns_to_us(mAudioStartPtsNs) + playedUs - mAudioCodecDelayUs;
+  if (mediaTimeUs < 0) {
+    return;
+  }
+  if (!mClock.IsStarted()) {
+    mClock.SetStartMediaTime(mediaTimeUs);
+  }
+  mClock.SetPresentationTime(mediaTimeUs);
+
+  int64_t nowUs = get_time_us();
+  // chunk 1 つぶんの先 (= 安全マージン) を maxMediaTimeUs として渡す
+  int64_t maxMediaTimeUs = mediaTimeUs + 100000; // +100ms
+  mClock.UpdateAnchorTime(mediaTimeUs, nowUs, maxMediaTimeUs);
+  mAudioResumeMediaTimeUs = mediaTimeUs;
 }
 
 void
@@ -1217,23 +1029,21 @@ MoviePlayerCore::PreLoadInput()
 void
 MoviePlayerCore::SetState(State newState)
 {
-#ifdef INNER_AUDIOENGINE
-  if (mAudioEngine) {
+  if (mAudioSink) {
     switch (newState) {
     case STATE_PLAY:
-      mAudioEngine->Start();
+      mAudioSink->Start();
       break;
     case STATE_PAUSE:
     case STATE_STOP:
     case STATE_FINISH:
-      mAudioEngine->Stop();
+      mAudioSink->Stop();
       break;
     default:
       // nothing to do.
       break;
     }
   }
-#endif
   if (mState != newState) {
     mState = newState;
     if (mOnStateFunc) {
@@ -1259,21 +1069,17 @@ MoviePlayerCore::IsCurrentState(State state) const
 void
 MoviePlayerCore::SetVolume(float volume)
 {
-#ifdef INNER_AUDIOENGINE
-  if (mAudioEngine) {
-    mAudioEngine->SetVolume(volume);
+  if (mAudioSink) {
+    mAudioSink->SetVolume(volume);
   }
-#endif
 }
 
 float
 MoviePlayerCore::Volume() const
 {
   float volume = 1.0f;
-#ifdef INNER_AUDIOENGINE
-  if (mAudioEngine) {
-    volume = mAudioEngine->Volume();
+  if (mAudioSink) {
+    volume = mAudioSink->Volume();
   }
-#endif
   return volume;
 }

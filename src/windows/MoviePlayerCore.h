@@ -7,7 +7,7 @@
 #include "MediaClock.h"
 #include <functional>
 
-class AudioEngine;
+class IAudioSink;
 class IMovieReadStream;
 
 class MoviePlayerCore : public MessageLooper
@@ -39,7 +39,7 @@ public:
   };
 
 public:
-  MoviePlayerCore(PixelFormat pixelFormat, bool useAudioEngine=true);
+  MoviePlayerCore(PixelFormat pixelFormat, IAudioSink *audioSink);
   virtual ~MoviePlayerCore();
 
   void Init();
@@ -78,15 +78,9 @@ public:
   bool Loop() const;
 
   bool GetVideoFrame(const DecodedBuffer **videoFrame);
-  bool GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
-                     uint64_t *timeStampUs);
 
   void SetOnState(std::function<void(State)> func) {
     mOnStateFunc = func;
-  }
-
-  void SetOnAudioDecoded(std::function<void(const uint8_t *, size_t)> func) {
-    mOnAudioDecodedFunc = func;
   }
 
   void SetOnVideoDecoded(std::function<void(const DecodedBuffer *)> func) {
@@ -124,6 +118,10 @@ protected:
   void EnqueueAudio(DecodedBuffer *buf);
   void EnqueueVideo(DecodedBuffer *buf);
 
+  // sink->TryPopConsumed を drain して decoder buffer を release し、
+  // 同時に sink->GetSamplesPlayed から MediaClock を更新する。
+  void DrainAudioSinkConsumed();
+
 private:
   // ステート
   State mState;
@@ -157,36 +155,19 @@ private:
   DecodedBuffer *mVideoFrame, *mVideoFrameNext;
   DecodedBuffer *mVideoFrameLastGet;
 
-#ifdef INNER_AUDIOENGINE
-  // 内部オーディオエンジン
-  AudioEngine *mAudioEngine;
-#endif
+  // 外部 audio sink (host が用意)。所有しない。nullptr なら audio 無し再生。
+  IAudioSink *mAudioSink;
 
-  // 出力オーディオフレーム管理
-  // - mAudioFrameRing: decoder thread (EnqueueAudio) → audio thread (GetAudioFrame)
-  // - mAudioReleasedRing: audio thread → decoder thread (ReleaseDecodedBufferIndex
-  //   の syscall を audio callback コンテキストから引き剥がすための deferred キュー)
-  // - mAudioFrameMutex: 上記 ring と下の状態変数を Flush と協調させるためのもの
-  static const size_t AUDIO_RING_CAP = 32; // 2 のべき乗。実用滞留量(数本)に対し十分
-  std::mutex mAudioFrameMutex;
-  int32_t mAudioUnitSize;     // オーディオ1サンプルのサイズ
-  size_t mAudioDataPos;       // 現在出力中のバッファ内での位置
-  int64_t mAudioOutputFrames; // 現メディアクロック期間中に出力したフレーム数
-  uint64_t mAudioCodecDelayUs; // audio codec delay(出力しないマイナスフレーム長)
-  struct
-  {
-    uint64_t base;         // 現在のフレーム先頭のPTS
-    uint64_t outputFrames; // 現在のPTSを持つデータから何個出力したか
-                           // (同PTSが複数パケットにわたるケースがあるのでその対応用)
-    void Reset() { base = INT64_MAX, outputFrames = 0; }
-  } mAudioTime;
-  int64_t mAudioResumeMediaTimeUs; // resume時に最速反映するための最終出力時刻
-  SPSCRing<DecodedBuffer *, AUDIO_RING_CAP> mAudioFrameRing;
-  SPSCRing<int32_t, AUDIO_RING_CAP> mAudioReleasedRing;
+  // 出力オーディオフレーム情報
+  int32_t mAudioUnitSize;       // オーディオ1サンプルのサイズ
+  uint64_t mAudioCodecDelayUs;  // audio codec delay (出力しない頭のオフセット)
+  uint64_t mAudioStartPtsNs;    // 最初に enqueue した audio buffer の PTS
+                                // (sink->GetSamplesPlayed と組合せて clock を計算)
+  bool mAudioStartPtsValid;     // mAudioStartPtsNs が有効かどうか
+  int64_t mAudioResumeMediaTimeUs; // resume 時に最速反映するための最終出力時刻
 
   std::function<void(State)> mOnStateFunc;
   std::function<void(const DecodedBuffer *)> mOnVideoDecodedFunc;
-  std::function<void(const uint8_t *, size_t)> mOnAudioDecodedFunc;
 
   // 同期用イベントフラグ
   enum

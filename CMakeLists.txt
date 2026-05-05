@@ -11,8 +11,11 @@ set(PROJ_NAME movieplayer)
 project(${PROJ_NAME})
 
 option(BUILD_TEST "build test programs" OFF)
-option(MOVIEPLAYER_EXTERNAL_SDLAUDIO "use external sdl audio" OFF)
-option(MOVIEPLAYER_EXTERNAL_MINIAUDIO "use external miniaudio" OFF)
+# Android のみ内部 AudioEngine (miniaudio / SDL audio) を使用する。
+# Windows/Linux/macOS の nestegg ベース版は host が IAudioSink を実装して
+# 渡す形に統一されているので、これらのオプションは Android 系のみ意味を持つ。
+option(MOVIEPLAYER_EXTERNAL_SDLAUDIO "use external sdl audio (Android only)" OFF)
+option(MOVIEPLAYER_EXTERNAL_MINIAUDIO "use external miniaudio (Android only)" OFF)
 
 if(MOVIEPLAYER_EXTERNAL_SDLAUDIO)
 set(AUDIO_ENGINE_SOURCES src/common/AudioEngineSDL.cpp)
@@ -122,7 +125,6 @@ endif()
 add_library(${PROJ_NAME} STATIC
 	src/common/MessageLooper.cpp
 	src/common/PixelConvert.cpp
-	${AUDIO_ENGINE_SOURCES}
 	src/common/MediaClock.cpp
 	src/windows/Decoder.cpp
 	src/windows/VpxDecoder.cpp
@@ -136,29 +138,11 @@ add_library(${PROJ_NAME} STATIC
 	extlibs/nestegg/src/nestegg.c
 )
 
-target_compile_definitions(${PROJ_NAME} PUBLIC
-	INNER_AUDIOENGINE=1
-)
+# audio 出力は host が IAudioSink を実装して InitParam.audioSink に渡す。
+# 内部 AudioEngine は持たない (Android 版のみ持つ)。
 
-if(MOVIEPLAYER_EXTERNAL_SDLAUDIO)
-find_package(SDL3 REQUIRED)
-target_compile_definitions(${PROJ_NAME} PUBLIC
-	EXTERNAL_SDL=1
-)
-target_link_libraries(${PROJ_NAME} PUBLIC SDL3::SDL3)
-else()
-#  miniaudio
-find_path(MINIAUDIO_INCLUDE_DIRS "miniaudio.h")
-target_include_directories(${PROJ_NAME} PRIVATE ${MINIAUDIO_INCLUDE_DIRS})
-if(MOVIEPLAYER_EXTERNAL_MINIAUDIO)
-target_compile_definitions(${PROJ_NAME} PUBLIC
-	EXTERNAL_MINIAUDIO=1
-)
-endif()
-endif()
-
-target_include_directories(${PROJ_NAME} 
-PUBLIC 
+target_include_directories(${PROJ_NAME}
+PUBLIC
 	include
 PRIVATE
 	src/windows

@@ -116,7 +116,7 @@ bool
 MoviePlayer::Open(const char *filepath)
 {
   mPlayer = new MoviePlayerCore(conv_color_format(mInitParam.videoColorFormat),
-                                mInitParam.useOwnAudioEngine);
+                                mInitParam.audioSink);
   return mPlayer->Open(filepath);
 }
 
@@ -124,7 +124,7 @@ bool
 MoviePlayer::Open(IMovieReadStream *stream)
 {
   mPlayer = new MoviePlayerCore(conv_color_format(mInitParam.videoColorFormat),
-                                mInitParam.useOwnAudioEngine);
+                                mInitParam.audioSink);
   return mPlayer->Open(stream);
 }
 
@@ -317,29 +317,7 @@ MoviePlayer::Loop() const
   }
 }
 
-bool
-MoviePlayer::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *framesRead,
-                           uint64_t *timeStampUs)
-{
-  if (frames == nullptr) {
-    LOGE("MoviePlayer: invalid destination buffer.\n");
-    return false;
-  }
-
-  if (!mPlayer) {
-    LOGE("MoviePlayer: internal player is not running.\n");
-    return false;
-  }
-
-  if (!IsPlaying()) {
-    LOGE("MoviePlayer: video is not playing now.\n");
-    return false;
-  }
-
-  return mPlayer->GetAudioFrame(frames, frameCount, framesRead, timeStampUs);
-}
-
-void 
+void
 MoviePlayer::SetOnState(OnState func, void *userPtr)
 {
   if (!mPlayer) {
@@ -376,17 +354,6 @@ MoviePlayer::SetOnVideoDecoded(OnVideoDecoded callback)
         }
       }
     });
-  });
-}
-
-void 
-MoviePlayer::SetOnAudioDecoded(OnAudioDecoded func, void *userPtr)
-{
-  if (!mPlayer) {
-    LOGE("MoviePlayer: internal player is not running.\n");
-  }
-  mPlayer->SetOnAudioDecoded([func, userPtr](const uint8_t *data, size_t size) {
-    func(userPtr, data, size);
   });
 }
 
