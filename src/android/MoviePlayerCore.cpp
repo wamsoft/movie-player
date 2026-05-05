@@ -8,7 +8,7 @@
 #include "AudioTrackPlayer.h"
 #include "MoviePlayerCore.h"
 
-#include "AudioEngine.h"
+#include "IAudioSink.h"
 #include "IMoviePlayer.h"
 
 #include <unistd.h>
@@ -23,17 +23,13 @@
 // -----------------------------------------------------------------------------
 // MoviePlayerCore
 // -----------------------------------------------------------------------------
-MoviePlayerCore::MoviePlayerCore(bool useAudioEngine)
+MoviePlayerCore::MoviePlayerCore(IAudioSink *audioSink)
 : mVideoTrackPlayer(nullptr)
 , mAudioTrackPlayer(nullptr)
 , mFd(-1)
 , mIsLoop(false)
+, mAudioSink(audioSink)
 {
-#ifdef INNER_AUDIOENGINE
-  if (useAudioEngine) {
-    mAudioEngine = CreateAudioEngine();
-  }
-#endif
   Init();
 }
 
@@ -53,13 +49,7 @@ MoviePlayerCore::Init()
 void
 MoviePlayerCore::Done()
 {
-#ifdef INNER_AUDIOENGINE
-  if (mAudioEngine) {
-    mAudioEngine->Done();
-    delete mAudioEngine;
-    mAudioEngine = nullptr;
-  }
-#endif
+  // mAudioSink は host 所有なのでここでは触らない (host が破棄する)
 
   if (mAudioTrackPlayer != nullptr) {
     mAudioTrackPlayer->Stop();
@@ -247,16 +237,6 @@ MoviePlayerCore::SetupVideoTrackPlayer(AMediaExtractor *ex)
 }
 
 bool
-MoviePlayerCore::ReadAudioData(uint8_t* buffer, uint64_t frameCount, uint64_t* framesRead)
-{
-  if (mAudioTrackPlayer) {
-    return mAudioTrackPlayer->ReadFromRingBuffer(buffer, frameCount, framesRead);
-  }
-  return false;
-}
-
-
-bool
 MoviePlayerCore::SetupAudioTrackPlayer(AMediaExtractor *ex)
 {
   // 初めて見つけたオーディオトラックのみを対象にする
@@ -271,25 +251,10 @@ MoviePlayerCore::SetupAudioTrackPlayer(AMediaExtractor *ex)
       AMediaExtractor_delete(ex);
       return false;
     } else if (!strncmp(mime, "audio/", 6)) {
-      mAudioTrackPlayer = new AudioTrackPlayer(ex, i, &mClock);
+      // sink を AudioTrackPlayer に渡す。Setup は AudioTrackPlayer の
+      // ctor 内で format 確定時に呼ぶ。
+      mAudioTrackPlayer = new AudioTrackPlayer(ex, i, &mClock, mAudioSink);
       AMediaFormat_delete(format);
-
-#ifdef INNER_AUDIOENGINE
-      // 自前オーディオ再生の場合はAudioEngineを初期化する
-      if (mAudioEngine != nullptr) {
-        // XXX でコードされてるので通常これ？
-        AudioFormat audioFormat = AUDIO_FORMAT_S16;
-        mAudioEngine->Init([](void *userData, uint8_t *buffer, uint64_t frameCount, uint64_t *framesRead) {
-            MoviePlayerCore* player = static_cast<MoviePlayerCore*>(userData);
-            if (player) {
-              return player->ReadAudioData(buffer, frameCount, framesRead);
-            }
-            return false;
-        }, this, audioFormat, mAudioTrackPlayer->Channels(), mAudioTrackPlayer->SampleRate());
-        mAudioEngine->Start();
-      }
-#endif
-
       return true;
     } else {
       AMediaFormat_delete(format);
@@ -510,21 +475,17 @@ MoviePlayerCore::Loop() const
 void
 MoviePlayerCore::SetVolume(float volume)
 {
-#ifdef INNER_AUDIOENGINE
-  if (mAudioEngine) {
-    mAudioEngine->SetVolume(volume);
+  if (mAudioSink) {
+    mAudioSink->SetVolume(volume);
   }
-#endif
 }
 
 float
 MoviePlayerCore::Volume() const
 {
   float volume = 1.0f;
-#ifdef INNER_AUDIOENGINE
-  if (mAudioEngine) {
-    volume = mAudioEngine->Volume();
+  if (mAudioSink) {
+    volume = mAudioSink->Volume();
   }
-#endif
   return volume;
 }

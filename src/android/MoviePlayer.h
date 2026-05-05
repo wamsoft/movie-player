@@ -50,8 +50,6 @@ public:
   virtual bool IsPlaying() const override;
   virtual bool Loop() const override;
 
-  virtual void SetOnAudioDecoded(OnAudioDecoded func, void *userPtr) override;
-
   virtual void SetOnVideoDecoded(OnVideoDecoded func) override;
 
 private:

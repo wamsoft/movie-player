@@ -6,14 +6,14 @@
 #include "media/NdkMediaExtractor.h"
 #include <functional>
 
-class AudioEngine;
+class IAudioSink;
 class IMovieReadStream;
 
 // ムービープレイヤー内部実装クラス
 class MoviePlayerCore
 {
 public:
-  MoviePlayerCore(bool useAudioEngine=true);
+  MoviePlayerCore(IAudioSink *audioSink);
   virtual ~MoviePlayerCore();
 
   bool Open(const char *filepath);
@@ -57,14 +57,6 @@ public:
     }
   }
 
-  void SetOnAudioDecoded(OnAudioDecoded func, void *userPtr) {
-    if (mAudioTrackPlayer) {
-      mAudioTrackPlayer->SetOnAudioDecoded(func, userPtr);
-    }
-  }
-
-  bool ReadAudioData(uint8_t* buffer, uint64_t frameCount, uint64_t* framesRead);
-
 private:
   void Init();
   void Done();
@@ -97,8 +89,6 @@ private:
   // video 情報
   PixelFormat mPixelFormat;
 
-#ifdef INNER_AUDIOENGINE
-  // 内部オーディオエンジン
-  AudioEngine *mAudioEngine;
-#endif
+  // host 提供の audio sink (所有しない)
+  IAudioSink *mAudioSink;
 };

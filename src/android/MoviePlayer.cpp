@@ -139,15 +139,15 @@ MoviePlayer::Done()
 bool
 MoviePlayer::Open(const char *filepath)
 {
-  mPlayer = new MoviePlayerCore(mInitParam.useOwnAudioEngine);
+  mPlayer = new MoviePlayerCore(mInitParam.audioSink);
   mPlayer->SetPixelFormat(conv_color_format(mInitParam.videoColorFormat));
   return mPlayer->Open(filepath);
 }
 
-bool 
+bool
 MoviePlayer::Open(IMovieReadStream *stream)
 {
-  mPlayer = new MoviePlayerCore(mInitParam.useOwnAudioEngine);
+  mPlayer = new MoviePlayerCore(mInitParam.audioSink);
   mPlayer->SetPixelFormat(conv_color_format(mInitParam.videoColorFormat));
   return mPlayer->Open(stream);
 }
@@ -155,7 +155,7 @@ MoviePlayer::Open(IMovieReadStream *stream)
 bool
 MoviePlayer::Open(int fd, off_t offset, off_t length)
 {
-  mPlayer = new MoviePlayerCore(mInitParam.useOwnAudioEngine);
+  mPlayer = new MoviePlayerCore(mInitParam.audioSink);
   mPlayer->SetPixelFormat(conv_color_format(mInitParam.videoColorFormat));
   return mPlayer->Open(fd, offset, length);
 }
@@ -379,14 +379,6 @@ MoviePlayer::Loop() const
     return mPlayer->Loop();
   } else {
     return false;
-  }
-}
-
-void
-MoviePlayer::SetOnAudioDecoded(OnAudioDecoded func, void *userPtr)
-{
-  if (mPlayer) {
-    mPlayer->SetOnAudioDecoded(func, userPtr);
   }
 }
 

@@ -4,12 +4,12 @@
 #include "Constants.h"
 #include "CommonUtils.h"
 #include "AudioTrackPlayer.h"
+#include "IAudioSink.h"
 
 AudioTrackPlayer::AudioTrackPlayer(AMediaExtractor *ex, int32_t trackIndex,
-                                   MediaClock *timer)
+                                   MediaClock *timer, IAudioSink *audioSink)
 : TrackPlayer(ex, trackIndex, timer)
-, mOnAudioDecoded(nullptr)
-, mOnAudioDecodedUserPtr(nullptr)
+, mAudioSink(audioSink)
 {
   Init();
 
@@ -60,6 +60,22 @@ AudioTrackPlayer::AudioTrackPlayer(AMediaExtractor *ex, int32_t trackIndex,
 
   LOGV("audio duration=%lld, sampleRate=%d, channels=%d, bps=%d\n", mDuration,
        mSampleRate, mChannels, mBitsPerSample);
+
+  // sink へ format 通知。失敗したら audio 無し再生に切替。
+  if (mAudioSink) {
+    IAudioSink::Encoding encoding = IAudioSink::PCM_S16;
+    switch (mEncoding) {
+    case kAudioEncodingPcm8bit:  encoding = IAudioSink::PCM_U8;  break;
+    case kAudioEncodingPcm16bit: encoding = IAudioSink::PCM_S16; break;
+    case kAudioEncodingPcm32bit: encoding = IAudioSink::PCM_S32; break;
+    case kAudioEncodingPcmFloat: encoding = IAudioSink::PCM_F32; break;
+    default: break;
+    }
+    if (!mAudioSink->Setup(mChannels, mSampleRate, mBitsPerSample, encoding)) {
+      LOGE("audio sink setup failed; disabling audio output\n");
+      mAudioSink = nullptr;
+    }
+  }
 }
 
 AudioTrackPlayer::~AudioTrackPlayer()
@@ -76,103 +92,24 @@ AudioTrackPlayer::Init()
   mSampleRate    = -1;
   mBitsPerSample = -1;
   mMaxInputSize  = -1;
-
-  mOnAudioDecoded        = nullptr;
-  mOnAudioDecodedUserPtr = nullptr;
 }
 
 void
 AudioTrackPlayer::Done()
 {
-  // キューに残っているバッファを全て解放
-  ReleaseAllBuffers();
+  // sink がまだ pending している decoder buffer は、AMediaCodec_stop で
+  // 暗黙に release されるのでここで明示的にループを drain する必要はない。
 }
 
 void
-AudioTrackPlayer::EnqueueBuffer(ssize_t bufIdx, size_t offset, size_t size)
+AudioTrackPlayer::DrainAudioSinkConsumed()
 {
-  std::lock_guard<std::mutex> lock(mBufferQueueMutex);
-  
-  AudioBufferItem item;
-  item.bufIdx = bufIdx;
-  item.offset = offset;
-  item.size = size;
-  item.readOffset = 0;
-  mBufferQueue.push(item);
-}
-
-void
-AudioTrackPlayer::ReleaseAllBuffers()
-{
-  std::lock_guard<std::mutex> lock(mBufferQueueMutex);
-  
-  while (!mBufferQueue.empty()) {
-    AudioBufferItem& item = mBufferQueue.front();
-    if (mCodec) {
-      AMediaCodec_releaseOutputBuffer(mCodec, item.bufIdx, false);
-    }
-    mBufferQueue.pop();
+  if (!mAudioSink || !mCodec) return;
+  void *param = nullptr;
+  while (mAudioSink->TryPopConsumed(&param)) {
+    ssize_t bufIdx = (ssize_t)(intptr_t)param;
+    AMediaCodec_releaseOutputBuffer(mCodec, bufIdx, false);
   }
-  LOGV("All buffers released\n");
-}
-
-bool
-AudioTrackPlayer::ReadFromRingBuffer(uint8_t* buffer, uint64_t frameCount, uint64_t* framesRead)
-{
-  if (frameCount == 0) {
-    if (framesRead) *framesRead = 0;
-    return false;
-  }
-  
-  std::lock_guard<std::mutex> lock(mBufferQueueMutex);
-  
-  if (mBufferQueue.empty()) {
-    if (framesRead) *framesRead = 0;
-    return false;
-  }
-  
-  int32_t frameSize = (mBitsPerSample / 8) * mChannels;
-  size_t bytesRequested = frameCount * frameSize;
-  size_t bytesWritten = 0;
-  
-  while (bytesWritten < bytesRequested && !mBufferQueue.empty()) {
-    AudioBufferItem& item = mBufferQueue.front();
-    
-    // AMediaCodecからバッファを取得
-    size_t bufSize;
-    uint8_t* buf = AMediaCodec_getOutputBuffer(mCodec, item.bufIdx, &bufSize);
-    if (!buf) {
-      // バッファ取得失敗の場合はこのアイテムをスキップ
-      AMediaCodec_releaseOutputBuffer(mCodec, item.bufIdx, false);
-      mBufferQueue.pop();
-      continue;
-    }
-    
-    // このバッファから読み取れるバイト数
-    size_t remainingInBuffer = item.size - item.readOffset;
-    size_t bytesToCopy = std::min(remainingInBuffer, bytesRequested - bytesWritten);
-    
-    memcpy(buffer + bytesWritten, buf + item.offset + item.readOffset, bytesToCopy);
-    bytesWritten += bytesToCopy;
-    item.readOffset += bytesToCopy;
-    
-    // バッファを全て読み切ったら解放
-    if (item.readOffset >= item.size) {
-      AMediaCodec_releaseOutputBuffer(mCodec, item.bufIdx, false);
-      mBufferQueue.pop();
-    }
-  }
-  
-  uint64_t actualFramesRead = bytesWritten / frameSize;
-  
-  // 不足分をゼロで埋める
-  if (actualFramesRead < frameCount) {
-    size_t remainingBytes = (frameCount - actualFramesRead) * frameSize;
-    memset(buffer + bytesWritten, 0, remainingBytes);
-  }
-  
-  if (framesRead) *framesRead = actualFramesRead;
-  return actualFramesRead > 0;
 }
 
 int32_t
@@ -228,14 +165,14 @@ AudioTrackPlayer::MaxInputSize() const
 void
 AudioTrackPlayer::HandleMessage(int32_t what, int64_t arg, void *obj)
 {
-  // LOGV("handle msg %d", what);
-
-  // TODO 大体V/A共通になるので、問題なければDecode::HandleMessage()に集約管理
-  //      個別実装が必要になるメッセージのみ各自で実装する感じに
+  // sink が積んだ完了通知を回収して codec output buffer を release する。
+  // (decoder thread で行うことで audio callback の負荷を抑える)
+  DrainAudioSinkConsumed();
 
   switch (what) {
   case MSG_START:
     SetState(STATE_PLAY);
+    if (mAudioSink) mAudioSink->Start();
     Decode();
     mEventFlag.Set(EVENT_FLAG_PLAY_READY);
     break;
@@ -243,6 +180,7 @@ AudioTrackPlayer::HandleMessage(int32_t what, int64_t arg, void *obj)
   case MSG_PAUSE:
     if (GetState() == STATE_PLAY) {
       SetState(STATE_PAUSE);
+      if (mAudioSink) mAudioSink->Stop();
       Post(MSG_NOP, 0, nullptr, true); // 発行済メッセージを全フラッシュ
     }
     break;
@@ -251,6 +189,7 @@ AudioTrackPlayer::HandleMessage(int32_t what, int64_t arg, void *obj)
     if (GetState() == STATE_PAUSE) {
       mClock->Reset();
       SetState(STATE_PLAY);
+      if (mAudioSink) mAudioSink->Start();
       Decode();
     }
     break;
@@ -258,6 +197,7 @@ AudioTrackPlayer::HandleMessage(int32_t what, int64_t arg, void *obj)
   case MSG_SEEK:
     AMediaExtractor_seekTo(mExtractor, arg, AMEDIAEXTRACTOR_SEEK_NEXT_SYNC);
     AMediaCodec_flush(mCodec);
+    if (mAudioSink) mAudioSink->Flush();
     // TODO starttimeをV/A共通にしてるので、同期処理していない現状ではおかしくなるかも？
     mClock->Reset();
     mSawInputEOS  = false;
@@ -266,6 +206,7 @@ AudioTrackPlayer::HandleMessage(int32_t what, int64_t arg, void *obj)
 
   case MSG_STOP:
     SetState(STATE_STOP);
+    if (mAudioSink) mAudioSink->Stop();
     AMediaCodec_stop(mCodec);
     // AMediaCodec_delete(mCodec);
     Post(MSG_NOP, 0, nullptr, true); // 発行済メッセージを全フラッシュ
@@ -285,45 +226,25 @@ AudioTrackPlayer::HandleOutputData(ssize_t bufIdx, AMediaCodecBufferInfo &bufInf
                                    int32_t flags)
 {
   if (bufInfo.size > 0) {
-    // 出力バッファの内容をハンドラに返す
-    if (mOnAudioDecoded != nullptr) {
-      size_t bufSize;
-      uint8_t *buf = AMediaCodec_getOutputBuffer(mCodec, bufIdx, &bufSize);
-      mOnAudioDecoded(mOnAudioDecodedUserPtr, buf + bufInfo.offset, bufInfo.size);
-      // output buffer を開放
-      AMediaCodec_releaseOutputBuffer(mCodec, bufIdx, false);
+    if (mAudioSink) {
+      // sink へ流す。bufIdx を param に乗せ、consumed 通知が返ってきたところで
+      // AMediaCodec_releaseOutputBuffer を呼ぶ (DrainAudioSinkConsumed 経由)。
+      size_t bufSize = 0;
+      uint8_t *buf   = AMediaCodec_getOutputBuffer(mCodec, bufIdx, &bufSize);
+      if (buf) {
+        bool isLast = (bufInfo.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0;
+        mAudioSink->Enqueue(buf + bufInfo.offset, bufInfo.size, isLast,
+                            (void *)(intptr_t)bufIdx);
+      } else {
+        // 取得失敗時は codec slot だけ release
+        AMediaCodec_releaseOutputBuffer(mCodec, bufIdx, false);
+      }
     } else {
-      // コールバックが設定されていない場合はbufIdxをキューに追加
-      // バッファの解放はReadFromRingBufferで行う
-      EnqueueBuffer(bufIdx, bufInfo.offset, bufInfo.size);
+      // audio 無し再生: codec output を即時 release
+      AMediaCodec_releaseOutputBuffer(mCodec, bufIdx, false);
     }
+  } else {
+    // size 0 の出力は EOS マーカーなどなので codec slot は release だけしておく
+    AMediaCodec_releaseOutputBuffer(mCodec, bufIdx, false);
   }
-
-  // オーディオは片っ端から送って、先方で順次再生バッファに詰めてもらう形で
-  // 問題ない？
-#if 0 
-  // このフレームのPTSをタイマーに反映
-  int64_t mediaTimeUs = bufInfo.presentationTimeUs;
-  if (!mClock->IsStarted()) {
-    mClock->SetStartTime(mediaTimeUs);
-  }
-  mClock->SetCurrentMediaTime(mediaTimeUs);
-
-  //LOGV("audio output: id: %zu  size: %d  pts: %lld flags: %d", bufidx, info.size, mediaTimeUs, info.flags);
-
-  // PTSが未来の場合は反映を待ち合わせる
-  int64_t renderDelay = mClock->CalcDelay(mediaTimeUs);
-  if (renderDelay > 0) {
-    // LOGV("render delay sleep: %lld us \n", renderDelay);
-    std::this_thread::sleep_for(std::chrono::microseconds(renderDelay));
-  }
-#endif
-
-}
-
-void
-AudioTrackPlayer::SetOnAudioDecoded(OnAudioDecoded func, void *userPtr)
-{
-  mOnAudioDecoded        = func;
-  mOnAudioDecodedUserPtr = userPtr;
 }
