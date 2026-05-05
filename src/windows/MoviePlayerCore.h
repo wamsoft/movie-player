@@ -163,10 +163,14 @@ private:
 #endif
 
   // 出力オーディオフレーム管理
+  // - mAudioFrameRing: decoder thread (EnqueueAudio) → audio thread (GetAudioFrame)
+  // - mAudioReleasedRing: audio thread → decoder thread (ReleaseDecodedBufferIndex
+  //   の syscall を audio callback コンテキストから引き剥がすための deferred キュー)
+  // - mAudioFrameMutex: 上記 ring と下の状態変数を Flush と協調させるためのもの
+  static const size_t AUDIO_RING_CAP = 32; // 2 のべき乗。実用滞留量(数本)に対し十分
   std::mutex mAudioFrameMutex;
-  size_t mAudioQueuedBytes;
-  int32_t mAudioUnitSize; // オーディオ1サンプルのサイズ
-  size_t mAudioDataPos;   // 現在出力中のバッファ内での位置
+  int32_t mAudioUnitSize;     // オーディオ1サンプルのサイズ
+  size_t mAudioDataPos;       // 現在出力中のバッファ内での位置
   int64_t mAudioOutputFrames; // 現メディアクロック期間中に出力したフレーム数
   uint64_t mAudioCodecDelayUs; // audio codec delay(出力しないマイナスフレーム長)
   struct
@@ -177,7 +181,8 @@ private:
     void Reset() { base = INT64_MAX, outputFrames = 0; }
   } mAudioTime;
   int64_t mAudioResumeMediaTimeUs; // resume時に最速反映するための最終出力時刻
-  std::queue<DecodedBuffer *> mAudioFrameQueue;
+  SPSCRing<DecodedBuffer *, AUDIO_RING_CAP> mAudioFrameRing;
+  SPSCRing<int32_t, AUDIO_RING_CAP> mAudioReleasedRing;
 
   std::function<void(State)> mOnStateFunc;
   std::function<void(const DecodedBuffer *)> mOnVideoDecodedFunc;

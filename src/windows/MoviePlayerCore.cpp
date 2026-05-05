@@ -65,7 +65,6 @@ MoviePlayerCore::Init()
   mVideoFrameLastGet            = nullptr;
   mDummyFrame.InitByType(TRACK_TYPE_VIDEO, -1);
 
-  mAudioQueuedBytes       = 0;
   mAudioDataPos           = 0;
   mAudioUnitSize          = 0;
   mAudioOutputFrames      = 0;
@@ -643,6 +642,16 @@ MoviePlayerCore::HandleAudioOutput()
     return;
   }
 
+  // audio thread が consumed 通知用 ring に積んだ bufIndex を release。
+  // (audio callback コンテキストから ReleaseDecodedBufferIndex を直接呼ばず、
+  //  decoder thread であるここで肩代わりするためのもの)
+  {
+    int32_t bufIndex = -1;
+    while (mAudioReleasedRing.TryPop(bufIndex)) {
+      mAudioDecoder->ReleaseDecodedBufferIndex(bufIndex);
+    }
+  }
+
   if (mSawAudioOutputEOS) {
     return;
   }
@@ -814,12 +823,17 @@ MoviePlayerCore::Flush()
   // オーディオ出力待ちキューをフラッシュ＆ステータス類をリセット
   if (mAudioDecoder != nullptr) {
     std::lock_guard<std::mutex> lock(mAudioFrameMutex);
-    while (!mAudioFrameQueue.empty()) {
-      DecodedBuffer *buf = mAudioFrameQueue.front();
-      mAudioFrameQueue.pop();
-      mAudioDecoder->ReleaseDecodedBufferIndex(buf->bufIndex);
+    // pending ring を全部 release。Flush は decoder thread (= ReleaseDecodedBufferIndex
+    // の正規 caller スレッド) から呼ばれるので直接呼んで良い。
+    while (DecodedBuffer **front = mAudioFrameRing.TryPeek()) {
+      mAudioDecoder->ReleaseDecodedBufferIndex((*front)->bufIndex);
+      mAudioFrameRing.AdvancePop();
     }
-    mAudioQueuedBytes       = 0;
+    // audio thread が書き込んだ released ring も使い切る (ここで release は無害)
+    int32_t bufIndex = -1;
+    while (mAudioReleasedRing.TryPop(bufIndex)) {
+      mAudioDecoder->ReleaseDecodedBufferIndex(bufIndex);
+    }
     mAudioDataPos           = 0;
     mAudioOutputFrames      = 0;
     mAudioResumeMediaTimeUs = 0;
@@ -1012,8 +1026,12 @@ MoviePlayerCore::EnqueueAudio(DecodedBuffer *data)
     mAudioOutputFrames += readFrames;
 
   } else {
-    mAudioFrameQueue.push(data);
-    mAudioQueuedBytes += data->dataSize;
+    if (!mAudioFrameRing.TryPush(data)) {
+      // 容量を超えた (基本起こらないがフォールバックとして即時 release)
+      LOGE("audio frame ring full, dropping decoded buffer (bufIndex=%d)\n",
+           data->bufIndex);
+      mAudioDecoder->ReleaseDecodedBufferIndex(data->bufIndex);
+    }
   }
 }
 
@@ -1059,8 +1077,12 @@ MoviePlayerCore::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *fr
     uint64_t nextTimeBase     = 0;
 
     bool first = true;
-    while (bytesToRead > 0 && mAudioFrameQueue.size() > 0) {
-      const DecodedBuffer *data = mAudioFrameQueue.front();
+    while (bytesToRead > 0) {
+      DecodedBuffer **front = mAudioFrameRing.TryPeek();
+      if (!front) {
+        break;
+      }
+      DecodedBuffer *data = *front;
 
       // EOSバッファはフラグのみの空バッファなので打ち切り
       if (data->isEndOfStream) {
@@ -1095,8 +1117,14 @@ MoviePlayerCore::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *fr
         bytesToRead = 0;
       } else {
         memcpy(dst, data->data + mAudioDataPos, remain);
-        mAudioFrameQueue.pop();
-        mAudioDecoder->ReleaseDecodedBufferIndex(data->bufIndex);
+        // ReleaseDecodedBufferIndex は内部で mutex + Post (cv_signal) を踏むので
+        // audio callback コンテキストでは呼ばず、released ring に bufIndex を
+        // 積んで decoder thread (Decode ループ) で release する。
+        if (!mAudioReleasedRing.TryPush(data->bufIndex)) {
+          // 容量超え時のみ仕方なく直接 release する (理論上起こらない)
+          mAudioDecoder->ReleaseDecodedBufferIndex(data->bufIndex);
+        }
+        mAudioFrameRing.AdvancePop();
         dst += remain;
         frames = (remain / mAudioUnitSize);
         bytesToRead -= remain;
@@ -1105,7 +1133,6 @@ MoviePlayerCore::GetAudioFrame(uint8_t *frames, int64_t frameCount, uint64_t *fr
       readFrames += frames;
       nextOutputFrames += frames;
     }
-    mAudioQueuedBytes -= (reqBytes - bytesToRead);
     hasNewFrame = true;
 
     // 最終かつ読み込みが0フレームだった場合(ちょうどEOSバッファだけ残った場合)

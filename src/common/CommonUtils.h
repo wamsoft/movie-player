@@ -288,6 +288,73 @@ private:
   std::condition_variable mCond;
 };
 
+// -----------------------------------------------------------------------------
+// SPSCRing
+//   1 producer / 1 consumer 用の固定容量ロックフリーリング。
+//   producer / consumer がそれぞれ別スレッド固定であることを呼び出し側で
+//   保証すること。N は 2 のべき乗。
+// -----------------------------------------------------------------------------
+#include <atomic>
+
+template<class T, size_t N>
+class SPSCRing
+{
+  static_assert((N & (N - 1)) == 0, "N must be power of 2");
+
+public:
+  SPSCRing() : mHead(0), mTail(0) {}
+
+  bool TryPush(const T &v)
+  {
+    size_t h    = mHead.load(std::memory_order_relaxed);
+    size_t next = (h + 1) & (N - 1);
+    if (next == mTail.load(std::memory_order_acquire)) {
+      return false; // full
+    }
+    mBuffer[h] = v;
+    mHead.store(next, std::memory_order_release);
+    return true;
+  }
+
+  bool TryPop(T &outValue)
+  {
+    size_t t = mTail.load(std::memory_order_relaxed);
+    if (t == mHead.load(std::memory_order_acquire)) {
+      return false; // empty
+    }
+    outValue = mBuffer[t];
+    mTail.store((t + 1) & (N - 1), std::memory_order_release);
+    return true;
+  }
+
+  // front を覗くだけ (ポインタは AdvancePop までの間有効)
+  T *TryPeek()
+  {
+    size_t t = mTail.load(std::memory_order_relaxed);
+    if (t == mHead.load(std::memory_order_acquire)) {
+      return nullptr;
+    }
+    return &mBuffer[t];
+  }
+
+  void AdvancePop()
+  {
+    size_t t = mTail.load(std::memory_order_relaxed);
+    mTail.store((t + 1) & (N - 1), std::memory_order_release);
+  }
+
+  bool IsEmpty() const
+  {
+    return mTail.load(std::memory_order_acquire) ==
+           mHead.load(std::memory_order_acquire);
+  }
+
+private:
+  T mBuffer[N];
+  std::atomic<size_t> mHead; // producer index
+  std::atomic<size_t> mTail; // consumer index
+};
+
 template<class T>
 class SafeQueue
 {
