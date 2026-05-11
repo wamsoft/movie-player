@@ -1,3 +1,5 @@
+#define NOMINMAX
+
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -8,6 +10,7 @@
 
 #include "GLRenderer.h"
 #include "IMoviePlayer.h"
+#include "WaveOutAudioSink.h"
 
 #define TEST_PRE_CONV_YUV // 固定カラーフォーマット指定を使用
 // #define TEST_DIB_MODE  // DIBビットマップ想定の処理テストを行う(表示は逆さまになる)
@@ -92,6 +95,10 @@ main(int argc, char *argv[])
   glfwSetKeyCallback(glfwWin, key_callback);
   glfwSetScrollCallback(glfwWin, scroll_callback);
 
+  // テスト用 audio sink (WaveOut)。movie-player は内部に audio engine を持た
+  // ないので、テスト側で IAudioSink 実装を渡す。
+  WaveOutAudioSink audioSink;
+
   // MoviePlayer を作成
   IMoviePlayer::InitParam param;
   param.Init();
@@ -102,6 +109,7 @@ main(int argc, char *argv[])
   // UNKNOWN/NOCONV の場合は内部でYUV変換を行わない。シェーダなどで対応すると性能的に有利
   param.videoColorFormat = IMoviePlayer::COLOR_NOCONV;
 #endif
+  param.audioSink = &audioSink;
   IMoviePlayer *player = IMoviePlayer::CreateMoviePlayer(testFilePath.c_str(), param);
   if (player == nullptr) {
     printf("Failed to create MoviePlayer! \n");

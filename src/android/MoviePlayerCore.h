@@ -68,6 +68,10 @@ private:
   bool SetupVideoTrackPlayer(AMediaExtractor *ex);
   bool SetupAudioTrackPlayer(AMediaExtractor *ex);
 
+  // Open() の最後で、audio sink の有無に応じて video の同期モード
+  // (audio-master / video-master) を確定させる。
+  void PropagateSyncMode();
+
   enum
   {
     TRACK_VIDEO = 0,

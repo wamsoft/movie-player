@@ -90,13 +90,14 @@ MoviePlayerCore::Open(const char *filepath)
   bool isVideoFound    = vEx && SetupVideoTrackPlayer(vEx);
   bool isAudioFound    = aEx && SetupAudioTrackPlayer(aEx);
   if (isVideoFound || isAudioFound) {
+    PropagateSyncMode();
     Start();
     return true;
   }
   return false;
 }
 
-bool 
+bool
 MoviePlayerCore::Open(IMovieReadStream *stream)
 {
   if (stream) {
@@ -105,6 +106,7 @@ MoviePlayerCore::Open(IMovieReadStream *stream)
     bool isVideoFound    = vEx && SetupVideoTrackPlayer(vEx);
     bool isAudioFound    = aEx && SetupAudioTrackPlayer(aEx);
     if (isVideoFound || isAudioFound) {
+      PropagateSyncMode();
       Start();
       return true;
     }
@@ -122,11 +124,26 @@ MoviePlayerCore::Open(int fd, off_t offset, off_t length)
     bool isVideoFound    = vEx && SetupVideoTrackPlayer(vEx);
     bool isAudioFound    = aEx && SetupAudioTrackPlayer(aEx);
     if (isVideoFound || isAudioFound) {
+      PropagateSyncMode();
       Start();
       return true;
     }
   }
   return false;
+}
+
+void
+MoviePlayerCore::PropagateSyncMode()
+{
+  // 音声トラックがあり、かつ host が用意した sink の Setup にも成功している
+  // (= 実際に audio playback が clock anchor を駆動できる) ときに限り
+  // video 側は audio-master モードで動かす。それ以外は video-master fallback。
+  bool hasAudioClock = (mAudioTrackPlayer != nullptr) &&
+                        mAudioTrackPlayer->IsValid() &&
+                        mAudioTrackPlayer->HasActiveSink();
+  if (mVideoTrackPlayer) {
+    mVideoTrackPlayer->SetHasAudio(hasAudioClock);
+  }
 }
 
 AMediaExtractor *

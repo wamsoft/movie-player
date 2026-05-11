@@ -106,7 +106,21 @@ VideoTrackPlayer::VideoTrackPlayer(AMediaExtractor *ex, int32_t trackIndex,
   AMediaFormat_getInt32(format, AMEDIAFORMAT_KEY_HEIGHT, &mHeight);
   AMediaFormat_getInt64(format, AMEDIAFORMAT_KEY_DURATION, &mDuration);
 
-  LOGV("video duration = %lld", mDuration);
+  // フレームレート (float / int どちらの key で来るか不定なので両方試す)。
+  // 取れない場合は 30fps 相当をデフォルトとする。
+  {
+    float fpsF       = 0.0f;
+    int32_t fpsI     = 0;
+    if (AMediaFormat_getFloat(format, AMEDIAFORMAT_KEY_FRAME_RATE, &fpsF) && fpsF > 0.0f) {
+      mFrameDurationUs = (int64_t)(1'000'000.0f / fpsF);
+    } else if (AMediaFormat_getInt32(format, AMEDIAFORMAT_KEY_FRAME_RATE, &fpsI) && fpsI > 0) {
+      mFrameDurationUs = 1'000'000 / fpsI;
+    } else {
+      mFrameDurationUs = 33'333; // ~30fps
+    }
+  }
+
+  LOGV("video duration = %lld, frame duration = %lld us", mDuration, mFrameDurationUs);
 
   // 現在のメディアタイマーにセットされているDurationよりも長い場合は
   // それをムービー全体のDurationとして反映する
@@ -154,6 +168,9 @@ VideoTrackPlayer::Init()
   mOutputColorFormat = -1;
   mOutputColorRange  = -1;
   mOutputColorSpace  = -1;
+
+  mHasAudio        = false;
+  mFrameDurationUs = 33'333; // ctor で FRAME_RATE 取得時に上書きされる
 
   mOnVideoDecoded = nullptr;
   mOnVideoFormat = PIXEL_FORMAT_UNKNOWN;
@@ -243,39 +260,95 @@ void
 VideoTrackPlayer::HandleOutputData(ssize_t bufIdx, AMediaCodecBufferInfo &bufInfo,
                                    int32_t flags)
 {
-  // 出力バッファの内容をコピーする
-  if (bufInfo.size > 0) {
-
-    // このフレームのPTSをタイマーに反映
-    int64_t mediaTimeUs = bufInfo.presentationTimeUs;
-    if (!mClock->IsStarted()) {
-      mClock->SetStartMediaTime(mediaTimeUs);
-    }
-    mClock->SetPresentationTime(mediaTimeUs);
-
-    if (mOnVideoDecoded == nullptr) {
-      return;
-    }
-
-    size_t bufSize;
-    uint8_t *buf = AMediaCodec_getOutputBuffer(mCodec, bufIdx, &bufSize);
-    // YUVのプレーンごとのストライドなどを取得する方法が見当たらないので
-    // ソースプレーンがパディングされずに連続して配置されるものとして扱っている
-    // 一部デバイスや特殊サイズムービーだとうまくいかない可能性あり
-    const uint8_t *yBuf = buf + bufInfo.offset;
-    const uint8_t *uBuf = yBuf + mOutputWidth * mOutputHeight;
-    const uint8_t *vBuf = uBuf + (mOutputWidth * mOutputHeight / 4);
-    int32_t yStride     = mOutputWidth;
-    int32_t uvStride    = mOutputWidth / 2;
-    PixelFormat colorFormat = conv_color_format(mOutputColorFormat);
-    if (is_nv_pixel_format(colorFormat)) {
-      uvStride = mOutputWidth; // NVはUVがパックド
-    }
-    mOnVideoDecoded(mOutputWidth, mOutputHeight, [&](char *dest, int pitch) {
-      convert_yuv_to_rgb32((uint8_t*)dest, pitch, mOnVideoFormat, yBuf, uBuf, vBuf, 0, yStride, uvStride, 0,
-                          mOutputWidth, mOutputHeight, colorFormat, (ColorSpace)mOutputColorSpace,
-                          (ColorRange)mOutputColorRange);
-    });
+  if (bufInfo.size <= 0) {
+    // EOS マーカー等。codec slot だけ release。
     AMediaCodec_releaseOutputBuffer(mCodec, bufIdx, false);
+    return;
   }
+
+  int64_t mediaTimeUs = bufInfo.presentationTimeUs;
+  int64_t frameDurUs  = FrameDurationUs();
+
+  // -------- 同期判定 --------
+  // mClock が起動していなければ初回フレームとして無条件提示し、
+  // start media time をセットする (audio-master の場合は audio 側が
+  // anchor を貼るのを待つが、最初の絵だけは出してしまう)。
+  // 音声無し時は自身が anchor source となる。
+  enum { ACT_PRESENT, ACT_SKIP } action = ACT_PRESENT;
+
+  if (!mClock->IsStarted()) {
+    mClock->SetStartMediaTime(mediaTimeUs);
+    if (!mHasAudio) {
+      int64_t nowUs    = get_time_us();
+      mClock->UpdateAnchorTime(mediaTimeUs, nowUs, mediaTimeUs + frameDurUs);
+    }
+    // ACT_PRESENT のまま (初回フレームは無条件出す)
+  } else {
+    // 既に anchor あり。提示予定時刻 (real time) と現在 real time の差で判定。
+    int64_t targetRealUs = mClock->GetRealTimeFor(mediaTimeUs);
+    int64_t nowUs        = get_time_us();
+    int64_t diffUs       = nowUs - targetRealUs; // + 遅れ, - 早い
+
+    if (diffUs >= frameDurUs) {
+      // 1 フレーム以上遅れ → スキップ
+      action = ACT_SKIP;
+    } else if (diffUs < 0) {
+      // 早すぎ → 提示時刻まで sleep。
+      // MSG_STOP/PAUSE/SEEK の応答遅延を抑えるため、上限を 4 フレーム相当に
+      // キャップする (異常な PTS 値が来た時の保険)。
+      int64_t sleepUs = -diffUs;
+      int64_t maxWait = frameDurUs * 4;
+      if (sleepUs > maxWait) sleepUs = maxWait;
+      std::this_thread::sleep_for(std::chrono::microseconds(sleepUs));
+    }
+  }
+
+  if (action == ACT_SKIP) {
+    AMediaCodec_releaseOutputBuffer(mCodec, bufIdx, false);
+    // 音声無し時はスキップしても PTS だけは進めておく (anchor は更新しない)
+    if (!mHasAudio) {
+      mClock->SetPresentationTime(mediaTimeUs);
+    }
+    return;
+  }
+
+  // -------- 提示 --------
+  mClock->SetPresentationTime(mediaTimeUs);
+  if (!mHasAudio) {
+    // video-master: 自身が anchor を担当
+    int64_t nowUs2 = get_time_us();
+    mClock->UpdateAnchorTime(mediaTimeUs, nowUs2, mediaTimeUs + frameDurUs);
+  }
+
+  PresentFrame(bufIdx, bufInfo);
+}
+
+void
+VideoTrackPlayer::PresentFrame(ssize_t bufIdx, AMediaCodecBufferInfo &bufInfo)
+{
+  if (mOnVideoDecoded == nullptr) {
+    AMediaCodec_releaseOutputBuffer(mCodec, bufIdx, false);
+    return;
+  }
+
+  size_t bufSize;
+  uint8_t *buf = AMediaCodec_getOutputBuffer(mCodec, bufIdx, &bufSize);
+  // YUVのプレーンごとのストライドなどを取得する方法が見当たらないので
+  // ソースプレーンがパディングされずに連続して配置されるものとして扱っている
+  // 一部デバイスや特殊サイズムービーだとうまくいかない可能性あり
+  const uint8_t *yBuf = buf + bufInfo.offset;
+  const uint8_t *uBuf = yBuf + mOutputWidth * mOutputHeight;
+  const uint8_t *vBuf = uBuf + (mOutputWidth * mOutputHeight / 4);
+  int32_t yStride     = mOutputWidth;
+  int32_t uvStride    = mOutputWidth / 2;
+  PixelFormat colorFormat = conv_color_format(mOutputColorFormat);
+  if (is_nv_pixel_format(colorFormat)) {
+    uvStride = mOutputWidth; // NVはUVがパックド
+  }
+  mOnVideoDecoded(mOutputWidth, mOutputHeight, [&](char *dest, int pitch) {
+    convert_yuv_to_rgb32((uint8_t*)dest, pitch, mOnVideoFormat, yBuf, uBuf, vBuf, 0, yStride, uvStride, 0,
+                        mOutputWidth, mOutputHeight, colorFormat, (ColorSpace)mOutputColorSpace,
+                        (ColorRange)mOutputColorRange);
+  });
+  AMediaCodec_releaseOutputBuffer(mCodec, bufIdx, false);
 }

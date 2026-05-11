@@ -6,10 +6,12 @@
 MediaClock::MediaClock()
 : mDurationUs(-1)
 , mPresentationTimeUs(-1)
+, mStartMediaTimeUs(-1)
+, mStartSystemTimeUs(-1)
 , mAnchorMediaTimeUs(-1)
 , mAnchorRealTimeUs(-1)
 , mMaxMediaTimeUs(INT64_MAX)
-, mStartMediaTimeUs(-1)
+, mPlaybackRate(1.0f)
 {}
 
 MediaClock::~MediaClock()

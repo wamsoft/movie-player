@@ -21,6 +21,7 @@
 // -----------------------------------------------------------------------------
 
 #include "IMoviePlayer.h"
+#include "AAudioSink.h"
 
 
 static AAssetManager *s_assetManager = nullptr;
@@ -74,8 +75,9 @@ public:
 class MyMoviePlayer
 {
 public:
-  MyMoviePlayer() : m_player(nullptr), m_videoWidth(0), m_videoHeight(0), 
-                    m_videoBuffer(nullptr), m_videoBufferSize(0), m_updateFlag(false)
+  MyMoviePlayer() : m_player(nullptr), m_videoWidth(0), m_videoHeight(0),
+                    m_videoBuffer(nullptr), m_videoBufferSize(0), m_updateFlag(false),
+                    m_audioSink(nullptr)
   {
 
   }
@@ -87,10 +89,17 @@ public:
 
   void Shutdown()
   {
+    // player を先に落として decoder thread からの sink 呼び出しを止めてから
+    // sink を破棄する (順序逆だと callback と競合する)。
     if (m_player)
     {
       delete m_player;
       m_player = nullptr;
+    }
+    if (m_audioSink)
+    {
+      delete m_audioSink;
+      m_audioSink = nullptr;
     }
     if (m_videoBuffer)
     {
@@ -129,9 +138,15 @@ public:
     if (asset)
     {
       IMovieReadStream *stream = new AssetReadStream(asset);
+
+      // テスト用 audio sink (AAudio)。movie-player は audio engine を持たない
+      // ので InitParam::audioSink に渡して鳴らす。
+      m_audioSink = new AAudioSink();
+
       IMoviePlayer::InitParam param;
       param.Init();
       param.videoColorFormat = IMoviePlayer::COLOR_RGBA;
+      param.audioSink        = m_audioSink;
       m_player = IMoviePlayer::CreateMoviePlayer(stream, param);
       stream->Release();
 
@@ -222,6 +237,7 @@ private:
   char *m_videoBuffer;
   int m_videoBufferSize;
   bool m_updateFlag;
+  AAudioSink *m_audioSink;
 };
 
 #ifdef __cplusplus

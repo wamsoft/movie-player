@@ -58,5 +58,6 @@ target_link_libraries( # Specifies the target library.
         android
         mediandk
         OpenMAXAL
+        aaudio  # AAudioSink (test/.../AAudioSink.h) API 26+
         movieplayer
         )

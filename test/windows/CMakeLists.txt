@@ -20,10 +20,11 @@ find_package(glfw3 CONFIG REQUIRED)
 # ------------------------------------------------------------------------------
 
 add_executable(movie_player_test GLRenderer.cpp movie_player_test.cpp)
-target_link_libraries(movie_player_test PRIVATE 
+target_link_libraries(movie_player_test PRIVATE
   movieplayer
   GLEW::GLEW
   glfw
+  winmm  # WaveOutAudioSink (test/windows/WaveOutAudioSink.h)
 )
 
 # ------------------------------------------------------------------------------
