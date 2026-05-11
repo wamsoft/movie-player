@@ -5,7 +5,9 @@ import android.content.res.AssetFileDescriptor;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.SurfaceHolder;
@@ -21,8 +23,8 @@ import java.nio.ByteBuffer;
 import java.util.Random;
 
 /**
- * movieplayerのテストプログラム ムービーサイズでBitmapを作成して、SurfaceViewのCanvasに描画する ビットマップのストレッチは通常ではテクスチャ描画で行うはずだが
- * Bitmapだと面倒なのでこのテストでは何もせずにそのまま見切れた状態で描画する。
+ * movieplayerのテストプログラム ムービーサイズでBitmapを作成して、SurfaceViewのCanvasに描画する
+ * 描画は SurfaceView 全体にアスペクト維持で letterbox フィットする。
  */
 
 public class TestMovieView extends SurfaceView implements SurfaceHolder.Callback {
@@ -115,10 +117,28 @@ public class TestMovieView extends SurfaceView implements SurfaceHolder.Callback
         return false;
     }
 
-    // 画像を表示する
+    // 画像を表示する (SurfaceView 全体にアスペクト維持で letterbox フィット)
     private void drawMovie(Canvas canvas) {
+        canvas.drawColor(Color.BLACK);
+        if (movieBitmap == null || width <= 0 || height <= 0) {
+            return;
+        }
+        int cw = canvas.getWidth();
+        int ch = canvas.getHeight();
+        if (cw <= 0 || ch <= 0) {
+            return;
+        }
+        // 縦横どちらか余りが出る側に合わせて scale
+        float scale = Math.min((float) cw / width, (float) ch / height);
+        int dw = Math.max(1, Math.round(width * scale));
+        int dh = Math.max(1, Math.round(height * scale));
+        int dx = (cw - dw) / 2;
+        int dy = (ch - dh) / 2;
+        Rect src = new Rect(0, 0, width, height);
+        Rect dst = new Rect(dx, dy, dx + dw, dy + dh);
         Paint paint = new Paint();
-        canvas.drawBitmap(movieBitmap, 0, 0, paint);
+        paint.setFilterBitmap(true);
+        canvas.drawBitmap(movieBitmap, src, dst, paint);
     }
 
     @Override

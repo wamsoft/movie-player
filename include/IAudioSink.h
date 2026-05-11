@@ -32,6 +32,17 @@ public:
   // 寿命を保つ責任が enqueue 側にある (= movie-player 側の DecodedBuffer 寿命)。
   // last=true は EOS 表現 (この後新規データは来ない)。
   // param は consumed 通知時に返ってくる識別子。
+  //
+  // Android (AMediaCodec) 経路への注意:
+  //   AMediaCodec の output slot 数は小さい (Opus/Vorbis decoder で 2-4 程度)
+  //   ため、sink が data ポインタを保持し続けると codec output slot が pinned
+  //   のままになり、codec input 側まで backpressure が伝搬して decoder
+  //   iteration が `AMediaCodec_dequeueInputBuffer` の timeout に張り付く。
+  //   結果として PCM 供給が落ち、OnData 側が無音パディングを大量挿入する
+  //   (= 体感「音だけ遅い」) ことになる。
+  //   Android 向けの sink 実装は Enqueue 内で PCM を内部 buffer へコピーし、
+  //   `param` をその場で consumed キューに積んで codec slot を即解放できる
+  //   ようにすることを強く推奨する。test/android の AAudioSink が参考実装。
   virtual void Enqueue(const void *data, size_t bytes, bool last,
                        void *param) = 0;
 
