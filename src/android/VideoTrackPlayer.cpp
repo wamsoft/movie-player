@@ -326,7 +326,7 @@ VideoTrackPlayer::HandleOutputData(ssize_t bufIdx, AMediaCodecBufferInfo &bufInf
 void
 VideoTrackPlayer::PresentFrame(ssize_t bufIdx, AMediaCodecBufferInfo &bufInfo)
 {
-  if (mOnVideoDecoded == nullptr) {
+  if (mOnVideoDecoded == nullptr && mOnVideoDecodedPlanes == nullptr) {
     AMediaCodec_releaseOutputBuffer(mCodec, bufIdx, false);
     return;
   }
@@ -345,10 +345,42 @@ VideoTrackPlayer::PresentFrame(ssize_t bufIdx, AMediaCodecBufferInfo &bufInfo)
   if (is_nv_pixel_format(colorFormat)) {
     uvStride = mOutputWidth; // NVはUVがパックド
   }
-  mOnVideoDecoded(mOutputWidth, mOutputHeight, [&](char *dest, int pitch) {
-    convert_yuv_to_rgb32((uint8_t*)dest, pitch, mOnVideoFormat, yBuf, uBuf, vBuf, 0, yStride, uvStride, 0,
-                        mOutputWidth, mOutputHeight, colorFormat, (ColorSpace)mOutputColorSpace,
-                        (ColorRange)mOutputColorRange);
-  });
+  int W = mOutputWidth, H = mOutputHeight;
+  int W2 = (W + 1) / 2, H2 = (H + 1) / 2;
+
+  if (mOnVideoDecoded) {
+    // 旧 API: updater 経由で host バッファに直接 YUV→RGB 変換
+    mOnVideoDecoded(W, H, [&](char *dest, int pitch) {
+      convert_yuv_to_rgb32((uint8_t*)dest, pitch, mOnVideoFormat, yBuf, uBuf, vBuf, 0,
+                          yStride, uvStride, 0, W, H, colorFormat,
+                          (ColorSpace)mOutputColorSpace, (ColorRange)mOutputColorRange);
+    });
+  } else {
+    // 新 API: VideoFrameInfo 経由で plane を直接渡す。
+    // RGBA 要求時のみ mPackedBuffer に YUV→RGBA 変換、 YUV 要求時は codec output を直参照。
+    IMoviePlayer::VideoFrameInfo info{};
+    info.width  = W;
+    info.height = H;
+    info.colorFormat = to_imovie_color_format(mOnVideoFormat);
+    if (!is_yuv_pixel_format(mOnVideoFormat)) {
+      if (mPackedBuffer.size() != (size_t)W * H * 4) mPackedBuffer.assign((size_t)W * H * 4, 0);
+      convert_yuv_to_rgb32(mPackedBuffer.data(), W * 4, mOnVideoFormat, yBuf, uBuf, vBuf, 0,
+                          yStride, uvStride, 0, W, H, colorFormat,
+                          (ColorSpace)mOutputColorSpace, (ColorRange)mOutputColorRange);
+      info.planeCount = 1;
+      info.planes[IMoviePlayer::VIDEO_PLANE_PACKED] = { mPackedBuffer.data(), W, H, W * 4 };
+    } else if (mOnVideoFormat == PIXEL_FORMAT_I420) {
+      info.planeCount = 3;
+      info.planes[IMoviePlayer::VIDEO_PLANE_Y] = { yBuf, W,  H,  yStride };
+      info.planes[IMoviePlayer::VIDEO_PLANE_U] = { uBuf, W2, H2, uvStride };
+      info.planes[IMoviePlayer::VIDEO_PLANE_V] = { vBuf, W2, H2, uvStride };
+    } else {
+      // NV12 / NV21: Y + UV interleaved
+      info.planeCount = 2;
+      info.planes[IMoviePlayer::VIDEO_PLANE_Y] = { yBuf, W,  H,  yStride };
+      info.planes[1]                           = { uBuf, W2, H2, uvStride };
+    }
+    mOnVideoDecodedPlanes(info);
+  }
   AMediaCodec_releaseOutputBuffer(mCodec, bufIdx, false);
 }

@@ -390,6 +390,14 @@ MoviePlayer::SetOnVideoDecoded(OnVideoDecoded func)
   }
 }
 
+void
+MoviePlayer::SetOnVideoDecodedPlanes(OnVideoDecodedPlanes func)
+{
+  if (mPlayer) {
+    mPlayer->SetOnVideoDecodedPlanes(func);
+  }
+}
+
 IMoviePlayer *
 IMoviePlayer::CreateMoviePlayer(const char *filename, InitParam &param)
 {

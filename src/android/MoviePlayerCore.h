@@ -56,6 +56,11 @@ public:
       mVideoTrackPlayer->SetOnVideoDecoded(func, mPixelFormat);
     }
   }
+  void SetOnVideoDecodedPlanes(IMoviePlayer::OnVideoDecodedPlanes func) {
+    if (mVideoTrackPlayer) {
+      mVideoTrackPlayer->SetOnVideoDecodedPlanes(func, mPixelFormat);
+    }
+  }
 
 private:
   void Init();

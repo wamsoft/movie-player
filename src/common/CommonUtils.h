@@ -8,6 +8,8 @@
 
 #include <string>
 
+#include "IMoviePlayer.h"   // to_imovie_color_format で IMoviePlayer::ColorFormat を返す
+
 // -----------------------------------------------------------------------------
 // logger for inline implementations
 // -----------------------------------------------------------------------------
@@ -197,6 +199,25 @@ inline bool
 is_nv_pixel_format(PixelFormat format)
 {
   return (format == PIXEL_FORMAT_NV12 || format == PIXEL_FORMAT_NV21);
+}
+
+// PixelFormat (内部 enum) → IMoviePlayer::ColorFormat (公開 enum) 変換。
+// 両 enum で値が異なる (ABGR/ARGB 順位入れ替え、 YUV オフセット差) ため、
+// switch でマップする。 新 OnVideoDecoded callback (plane 直渡し版) の
+// VideoFrameInfo::colorFormat を埋めるのに各 platform 実装から使う。
+inline IMoviePlayer::ColorFormat
+to_imovie_color_format(PixelFormat pf)
+{
+  switch (pf) {
+  case PIXEL_FORMAT_ABGR: return IMoviePlayer::COLOR_ABGR;
+  case PIXEL_FORMAT_ARGB: return IMoviePlayer::COLOR_ARGB;
+  case PIXEL_FORMAT_RGBA: return IMoviePlayer::COLOR_RGBA;
+  case PIXEL_FORMAT_BGRA: return IMoviePlayer::COLOR_BGRA;
+  case PIXEL_FORMAT_I420: return IMoviePlayer::COLOR_I420;
+  case PIXEL_FORMAT_NV12: return IMoviePlayer::COLOR_NV12;
+  case PIXEL_FORMAT_NV21: return IMoviePlayer::COLOR_NV21;
+  default:                return IMoviePlayer::COLOR_UNKNOWN;
+  }
 }
 
 // -----------------------------------------------------------------------------

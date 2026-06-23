@@ -51,6 +51,7 @@ public:
   virtual bool Loop() const override;
 
   virtual void SetOnVideoDecoded(OnVideoDecoded func) override;
+  virtual void SetOnVideoDecodedPlanes(OnVideoDecodedPlanes func) override;
 
 private:
   void Init();

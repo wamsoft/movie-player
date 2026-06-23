@@ -328,18 +328,20 @@ MoviePlayer::SetOnState(OnState func, void *userPtr)
   });
 }
 
-void 
+// 旧 API: ARGB / RGBA / BGRA 等の packed format 専用の高速経路。
+// updater(dest, pitch) を 1 回呼ぶことで packed RGBA を host バッファに直接
+// 書き込ませる。 余計な memcpy を経由しない。 YUV を要求した場合の挙動は未定義
+// (SetOnVideoDecodedPlanes を使うこと)。
+void
 MoviePlayer::SetOnVideoDecoded(OnVideoDecoded callback)
 {
   if (!mPlayer) {
     LOGE("MoviePlayer: internal player is not running.\n");
   }
   mPlayer->SetOnVideoDecoded([callback](const DecodedBuffer *data) {
-
-    // 現状はARGBフォーマット固定
     int w = data->v.width;
     int h = data->v.height;
-    int spitch = w * 4; // ARGBのストライド
+    int spitch = w * 4; // packed RGBA のストライド
     char *src = (char*)data->data;
     callback(w, h, [w, h, spitch, src](char *dest, int dpitch) {
       if (dpitch == spitch && dpitch > 0) {
@@ -354,6 +356,55 @@ MoviePlayer::SetOnVideoDecoded(OnVideoDecoded callback)
         }
       }
     });
+  });
+}
+
+// 新 API: YUV plane 含む全 format 対応。 host は VideoFrameInfo の planes[] を直接読む。
+// SetOnVideoDecoded と排他 (内部 slot を上書きするので最後に呼んだ方のみ有効)。
+void
+MoviePlayer::SetOnVideoDecodedPlanes(OnVideoDecodedPlanes callback)
+{
+  if (!mPlayer) {
+    LOGE("MoviePlayer: internal player is not running.\n");
+  }
+  mPlayer->SetOnVideoDecoded([callback](const DecodedBuffer *data) {
+    VideoFrameInfo info{};
+    info.width        = data->v.width;
+    info.height       = data->v.height;
+    info.colorFormat  = conv_pixel_format(data->v.format);
+
+    int W = data->v.width;
+    int H = data->v.height;
+    int W2 = (W + 1) / 2;
+    int H2 = (H + 1) / 2;
+
+    switch (info.colorFormat) {
+    case IMoviePlayer::COLOR_I420:
+      info.planeCount = 3;
+      info.planes[IMoviePlayer::VIDEO_PLANE_Y] = { data->v.planes[VDB_PLANE_Y], W,  H,  data->v.stride[VDB_PLANE_Y] };
+      info.planes[IMoviePlayer::VIDEO_PLANE_U] = { data->v.planes[VDB_PLANE_U], W2, H2, data->v.stride[VDB_PLANE_U] };
+      info.planes[IMoviePlayer::VIDEO_PLANE_V] = { data->v.planes[VDB_PLANE_V], W2, H2, data->v.stride[VDB_PLANE_V] };
+      break;
+    case IMoviePlayer::COLOR_NV12:
+    case IMoviePlayer::COLOR_NV21:
+      info.planeCount = 2;
+      info.planes[IMoviePlayer::VIDEO_PLANE_Y] = { data->v.planes[VDB_PLANE_Y], W,  H,  data->v.stride[VDB_PLANE_Y] };
+      info.planes[1]                           = { data->v.planes[VDB_PLANE_U], W2, H2, data->v.stride[VDB_PLANE_U] };
+      break;
+    case IMoviePlayer::COLOR_ARGB:
+    case IMoviePlayer::COLOR_ABGR:
+    case IMoviePlayer::COLOR_RGBA:
+    case IMoviePlayer::COLOR_BGRA:
+    default:
+      info.planeCount = 1;
+      info.planes[IMoviePlayer::VIDEO_PLANE_PACKED] = {
+        data->v.planes[VDB_PLANE_PACKED] ? data->v.planes[VDB_PLANE_PACKED] : (const uint8_t*)data->data,
+        W, H,
+        data->v.stride[VDB_PLANE_PACKED] > 0 ? data->v.stride[VDB_PLANE_PACKED] : (W * 4)
+      };
+      break;
+    }
+    callback(info);
   });
 }
 

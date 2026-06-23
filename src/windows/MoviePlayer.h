@@ -43,6 +43,7 @@ public:
   virtual void SetOnState(OnState func, void *userPtr);
 
   virtual void SetOnVideoDecoded(OnVideoDecoded callback);
+  virtual void SetOnVideoDecodedPlanes(OnVideoDecodedPlanes callback);
 
 private:
   void Init();

@@ -159,10 +159,47 @@ public:
   virtual bool IsPlaying() const   = 0;
   virtual bool Loop() const        = 0;
 
-  // Video decoder callback
+  // Video decoder callback (旧型・ARGB 系専用、 高速経路)。
+  //   host は updater(dest, pitch) を 1 回呼ぶことで、 decoder 側の packed RGBA バッファを
+  //   直接 host バッファに「書き込ませる」 ── 余計な memcpy を経由しない最速ルート。
+  //   videoColorFormat = COLOR_ARGB / ABGR / RGBA / BGRA のときに使う。 YUV 形式
+  //   (COLOR_I420 / NV12 / NV21) を要求した場合の挙動は未定義 (= plane 経路を使うこと)。
   typedef std::function<void(char *dest, int pitch)> DestUpdater;
   typedef std::function<void(int w, int h, DestUpdater updater)> OnVideoDecoded;
   virtual void SetOnVideoDecoded(OnVideoDecoded callback) = 0;
+
+  // Video decoder callback (新型・YUV plane 対応、 汎用経路)。
+  //
+  // host は VideoFrameInfo の planes[i].data / stride / width / height を読んで
+  // 任意の宛先 (CPU バッファ / GL テクスチャ) にコピーする。 callback から
+  // return した時点で planes[i].data は無効になるので、 必要なら同期的に copy
+  // しておくこと。
+  //
+  // packed (ARGB / ABGR / RGBA / BGRA): planeCount=1、 planes[0] が全体パック。
+  //                                     bytesPerPixel=4、 stride は通常 w*4。
+  // I420  (planar):  planeCount=3、 planes[0]=Y(w×h)、 [1]=U(w/2×h/2)、 [2]=V(w/2×h/2)。
+  //                                 bytesPerPixel=1。
+  // NV12  (semi-planar): planeCount=2、 [0]=Y(w×h)、 [1]=UV interleaved(w/2×h/2、 2 byte/pel)。
+  // NV21  (semi-planar): planeCount=2、 [0]=Y(w×h)、 [1]=VU interleaved。
+  //
+  // **SetOnVideoDecoded と SetOnVideoDecodedPlanes は排他**。 最後に呼んだ方の callback
+  // のみが有効になる (内部の slot を上書きする)。 同時利用は不可。
+  struct VideoFrameInfo
+  {
+    int width;
+    int height;
+    ColorFormat colorFormat;
+    int planeCount;
+    struct PlaneRef
+    {
+      const uint8_t *data;
+      int width;
+      int height;
+      int stride;
+    } planes[VIDEO_PLANE_COUNT];
+  };
+  typedef std::function<void(const VideoFrameInfo &frame)> OnVideoDecodedPlanes;
+  virtual void SetOnVideoDecodedPlanes(OnVideoDecodedPlanes callback) = 0;
 
   // 音声出力は InitParam::audioSink (IAudioSink*) を経由する。
   // SetOnAudioDecoded API は撤去された。
