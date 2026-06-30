@@ -159,7 +159,17 @@ MoviePlayerCore::CreateExtractor(const char *filepath)
   return ex;
 }
 
-static AMediaDataSource* CreateDataSource(IMovieReadStream* stream) {
+// custom data source の read コールバック用コンテキスト。
+//   IMovieReadStream は stateful (Seek+Read 2 段) なので、video/audio の 2 つの
+//   extractor が同一ストリームを共有すると並行 Seek+Read でレースする。
+//   lock は MoviePlayerCore が所有し 2 つの data source で共有することで、
+//   各 readAt の Seek+Read を atomic にする。
+struct StreamReadCtx {
+  IMovieReadStream* stream;
+  std::mutex*       lock;
+};
+
+static AMediaDataSource* CreateDataSource(IMovieReadStream* stream, std::mutex* lock) {
   if (!stream) {
     return nullptr;
   }
@@ -169,25 +179,33 @@ static AMediaDataSource* CreateDataSource(IMovieReadStream* stream) {
     return nullptr;
   }
   stream->AddRef(); // Ensure the stream is kept alive while used by AMediaDataSource
-  AMediaDataSource_setUserdata(dataSource, (void*)stream);
+  StreamReadCtx* ctx = new StreamReadCtx{ stream, lock };
+  AMediaDataSource_setUserdata(dataSource, (void*)ctx);
   AMediaDataSource_setReadAt(dataSource, [](void* userdata, off64_t offset, void* buffer, size_t size) -> ssize_t {
-    IMovieReadStream* stream = static_cast<IMovieReadStream*>(userdata);
-    if (stream) {
-      stream->Seek(offset, SEEK_SET);
-      size_t bytesRead = stream->Read(buffer, size);
-      return bytesRead > 0 ? bytesRead : -1;
+    StreamReadCtx* ctx = static_cast<StreamReadCtx*>(userdata);
+    if (ctx && ctx->stream) {
+      // Seek+Read を atomic に (共有ストリームのレース防止)
+      std::lock_guard<std::mutex> lk(*ctx->lock);
+      ctx->stream->Seek(offset, SEEK_SET);
+      size_t bytesRead = ctx->stream->Read(buffer, size);
+      return bytesRead > 0 ? (ssize_t)bytesRead : -1;
     }
     return -1;
   });
   AMediaDataSource_setClose(dataSource, [](void* userdata) {
-    IMovieReadStream* stream = static_cast<IMovieReadStream*>(userdata);
-    if (stream) {
-      stream->Release();
+    StreamReadCtx* ctx = static_cast<StreamReadCtx*>(userdata);
+    if (ctx) {
+      if (ctx->stream) ctx->stream->Release();
+      delete ctx;
     }
   });
   AMediaDataSource_setGetSize(dataSource, [](void* userdata) -> ssize_t {
-    IMovieReadStream* stream = static_cast<IMovieReadStream*>(userdata);
-    return stream ? stream->Size() : 0;
+    StreamReadCtx* ctx = static_cast<StreamReadCtx*>(userdata);
+    if (ctx && ctx->stream) {
+      std::lock_guard<std::mutex> lk(*ctx->lock);
+      return (ssize_t)ctx->stream->Size();
+    }
+    return 0;
   });
   return dataSource;
 }
@@ -197,7 +215,7 @@ MoviePlayerCore::CreateExtractor(IMovieReadStream *stream)
 {
   if (stream) {
     AMediaExtractor *ex = AMediaExtractor_new();
-    AMediaDataSource *dataSource = CreateDataSource(stream);
+    AMediaDataSource *dataSource = CreateDataSource(stream, &mStreamLock);
     media_status_t err  = AMediaExtractor_setDataSourceCustom(ex, dataSource);
     if (err != AMEDIA_OK) {
       LOGE("setDataSource error: %d", err);

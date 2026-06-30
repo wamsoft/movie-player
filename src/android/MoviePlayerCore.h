@@ -5,6 +5,7 @@
 #include "MediaClock.h"
 #include "media/NdkMediaExtractor.h"
 #include <functional>
+#include <mutex>
 
 class IAudioSink;
 class IMovieReadStream;
@@ -92,6 +93,11 @@ private:
   MediaClock mClock;
 
   int mFd;
+
+  // IMovieReadStream を共有する custom data source 経路で、video/audio の
+  // 2 つの extractor が同一ストリームへ並行に Seek+Read してレースするのを
+  // 防ぐためのロック (2 つの data source で共有する)。
+  std::mutex mStreamLock;
 
   bool mIsLoop;
 
