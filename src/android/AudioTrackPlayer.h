@@ -34,6 +34,11 @@ public:
 private:
   virtual void HandleMessage(int32_t what, int64_t arg, void *data) override;
 
+  // 実デコード出力フォーマットが確定したあと (最初の出力バッファ時点) に
+  // sample rate / channels / encoding を読み直して sink を Setup する。
+  // コンストラクタ (AMediaCodec_start 直後) では Opus 等で誤レートを掴むため。
+  void EnsureSinkSetup();
+
   // sink->TryPopConsumed を drain して AMediaCodec_releaseOutputBuffer を呼ぶ。
   // (audio callback コンテキストで release を直接呼ばずこちら (decoder thread)
   //  で肩代わりするための仕組み)
@@ -61,6 +66,9 @@ private:
   bool    mStartPtsValid;
   int64_t mStartPtsUs;
   int64_t mSamplesPlayedBase;
+
+  // 出力フォーマット確定後の sink 遅延セットアップを一度だけ行うためのフラグ
+  bool    mSinkSetup;
 
   // host 提供の audio sink (所有しない)
   IAudioSink *mAudioSink;

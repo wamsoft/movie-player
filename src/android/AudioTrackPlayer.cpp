@@ -34,7 +34,46 @@ AudioTrackPlayer::AudioTrackPlayer(AMediaExtractor *ex, int32_t trackIndex,
   AMediaCodec_configure(mCodec, format, nullptr, nullptr, 0);
   AMediaCodec_start(mCodec);
 
-  // 出力フォーマット
+  // 出力フォーマット (sample rate / channels / encoding) と sink の Setup は
+  // ここでは行わない。AMediaCodec_start 直後の getOutputFormat() はまだ
+  // INFO_OUTPUT_FORMAT_CHANGED が来ていないためコンテナ由来の初期値を返し、
+  // 実デコード出力レートと食い違うことがある (例: Opus はコンテナに元レート
+  // 24000 が記録されていても常に 48000 で出力する)。誤レートで sink を開くと
+  // 再生速度がずれる (半分速度 = 音が遅い) ため、実出力フォーマットが確定した
+  // 最初の出力バッファ時点で EnsureSinkSetup() 内から読み直して Setup する。
+}
+
+AudioTrackPlayer::~AudioTrackPlayer()
+{
+  Done();
+}
+
+void
+AudioTrackPlayer::Init()
+{
+  mDuration = -1;
+
+  mChannels      = -1;
+  mSampleRate    = -1;
+  mBitsPerSample = -1;
+  mMaxInputSize  = -1;
+
+  mStartPtsValid     = false;
+  mStartPtsUs        = -1;
+  mSamplesPlayedBase = 0;
+
+  mSinkSetup = false;
+}
+
+void
+AudioTrackPlayer::EnsureSinkSetup()
+{
+  if (mSinkSetup) return;
+  mSinkSetup = true; // 成否に関わらず一度だけ試行する
+
+  // 実デコード出力フォーマットを読む。最初の出力バッファが来た時点では
+  // INFO_OUTPUT_FORMAT_CHANGED 済みなので、ここで getOutputFormat() を
+  // 読み直すと実レート (Opus なら 48000 等) が得られる。
   AMediaFormat *outFormat = AMediaCodec_getOutputFormat(mCodec);
   AMediaFormat_getInt32(outFormat, AMEDIAFORMAT_KEY_SAMPLE_RATE, &mSampleRate);
   AMediaFormat_getInt32(outFormat, AMEDIAFORMAT_KEY_CHANNEL_COUNT, &mChannels);
@@ -57,9 +96,10 @@ AudioTrackPlayer::AudioTrackPlayer(AMediaExtractor *ex, int32_t trackIndex,
   if (mEncoding <= 0) {
     mEncoding = kAudioEncodingPcm16bit;
   }
+  AMediaFormat_delete(outFormat);
 
-  LOGV("audio duration=%lld, sampleRate=%d, channels=%d, bps=%d\n", mDuration,
-       mSampleRate, mChannels, mBitsPerSample);
+  LOGV("audio sink setup: sampleRate=%d, channels=%d, bps=%d, enc=%d\n",
+       mSampleRate, mChannels, mBitsPerSample, mEncoding);
 
   // sink へ format 通知。失敗したら audio 無し再生に切替。
   if (mAudioSink) {
@@ -74,28 +114,12 @@ AudioTrackPlayer::AudioTrackPlayer(AMediaExtractor *ex, int32_t trackIndex,
     if (!mAudioSink->Setup(mChannels, mSampleRate, mBitsPerSample, encoding)) {
       LOGE("audio sink setup failed; disabling audio output\n");
       mAudioSink = nullptr;
+    } else if (GetState() == STATE_PLAY) {
+      // MSG_START 時点ではまだ sink 未生成で Start() が空振りしているので、
+      // セットアップ完了したこのタイミングで再生開始する。
+      mAudioSink->Start();
     }
   }
-}
-
-AudioTrackPlayer::~AudioTrackPlayer()
-{
-  Done();
-}
-
-void
-AudioTrackPlayer::Init()
-{
-  mDuration = -1;
-
-  mChannels      = -1;
-  mSampleRate    = -1;
-  mBitsPerSample = -1;
-  mMaxInputSize  = -1;
-
-  mStartPtsValid     = false;
-  mStartPtsUs        = -1;
-  mSamplesPlayedBase = 0;
 }
 
 void
@@ -273,6 +297,10 @@ void
 AudioTrackPlayer::HandleOutputData(ssize_t bufIdx, AMediaCodecBufferInfo &bufInfo,
                                    int32_t flags)
 {
+  // 実出力フォーマット確定後 (= 最初の出力バッファ到達時) に sink を遅延
+  // セットアップする。コンストラクタ時点では誤レートになりうるため。
+  EnsureSinkSetup();
+
   if (bufInfo.size > 0) {
     if (mAudioSink) {
       // sink へ流す。bufIdx を param に乗せ、consumed 通知が返ってきたところで
