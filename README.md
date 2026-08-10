@@ -4,7 +4,25 @@ WebM 動画再生ライブラリです
 
 # LICENSE
 
-このライブラリ自体は MIT License です。利用してるライブラリはそれぞれのライセンスに従ってください。
+このライブラリ自体は MIT License です (LICENSE 参照)。利用してるライブラリはそれぞれのライセンスに従ってください。
+
+## 利用ライブラリとライセンス
+
+ライブラリ本体 (Windows/デスクトップビルド) がリンクするもの:
+
+| ライブラリ | 用途 | ライセンス | 全文 |
+|---|---|---|---|
+| [libvpx](https://github.com/webmproject/libvpx) | VP8/VP9 デコード | BSD-3-Clause | vcpkg `share/libvpx/copyright` |
+| [libyuv](https://chromium.googlesource.com/libyuv/libyuv/) | YUV→RGB 変換 | BSD-3-Clause | `extlibs/libyuv/LICENSE` |
+| [nestegg](https://github.com/mozilla/nestegg) | WebM (Matroska) demux | ISC | `extlibs/nestegg/LICENSE` |
+| [libogg](https://xiph.org/ogg/) | Ogg framing | BSD-3-Clause | vcpkg `share/libogg/copyright` |
+| [libvorbis](https://xiph.org/vorbis/) | Vorbis 音声デコード | BSD-3-Clause | vcpkg `share/libvorbis/copyright` |
+| [Opus](https://opus-codec.org/) | Opus 音声デコード | BSD-3-Clause | vcpkg `share/opus/copyright` |
+
+Android ビルドは NDK の MediaExtractor / MediaCodec (OS API) を使うため上記デコーダ群はリンクしません。
+glew / glfw3 (vcpkg.json 記載) はテストアプリ (`test/windows`) 専用で、ライブラリ本体には含まれません。
+
+バイナリ配布時は上記の著作権表示・ライセンス文の同梱が必要です (吉里吉里Z 本体に組み込む場合は、本体のライセンス収集機構が全文を内蔵します)。
 
 # 実装概要
 
