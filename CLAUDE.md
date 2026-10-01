@@ -96,6 +96,14 @@ IMovieReadStream / file
 
 Each `Decoder` is itself a `MessageLooper`-derived worker thread with two `BufferQueue<T>` slots (input `FramePacket`s, output `DecodedBuffer`s). `MoviePlayerCore` runs a third worker thread that pumps the extractor, dispatches packets to the right decoder, drains decoded buffers, runs `DrainAudioSinkConsumed` to release sink-consumed buffers and re-anchor `MediaClock`, and decides when to publish the next video frame to the host via `OnVideoDecoded`. State machine lives in `MoviePlayerCore::HandleMessage` (states: UNINIT → OPEN → PRELOADING → PLAY ⇄ PAUSE → STOP/FINISH).
 
+Pacing rules of the core thread (each one fixed a real bug — keep them):
+
+- **No busy loop.** `Decode()` re-posts `MSG_DECODE` every pass, but when a pass made no progress (`mDecodeProgressed` stays false: no packet queued, no decoded buffer taken, no frame swapped, no audio consumed) it first blocks in `MessageLooper::WaitForMessage(CalcIdleWaitUs())` — until the next frame's presentation time, capped at 10 ms (5 ms with audio). On Windows that wait is a high-resolution waitable timer plus a message-arrival event (`WaitForMultipleObjects`), because `condition_variable::wait_for` only wakes at the ~15.6 ms default timer granularity. Previously the loop only `yield`ed and pinned a core even for an 8 fps clip.
+- **Video-master clock anchors at the scheduled time.** Without audio, `SetVideoFrame` re-anchors `MediaClock` per displayed frame; if the frame is less than one frame late it anchors at the *scheduled* real time, otherwise wake-up latency accumulates and playback runs slow.
+- **The last frame is shown for one frame duration** before `mLastVideoFrameEnd` (i.e. FINISH / loop rewind). Frame duration = measured PTS interval (`mVideoFrameIntervalUs`), falling back to `mFrameRate` only when it is ≥ 1 fps, clamped to 1 s — some files carry a bogus frame rate (e.g. 0.0005).
+- **STOP / FINISH keep the last displayed frame** (`HoldLastVideoFrame`: copy into `mDummyFrame`, release the decoder buffer, no `OnVideoDecoded`). The old code swapped in `mDummyFrame` as-is, which still held the frame copied at the last seek (usually frame 0), so the host's image snapped back to the first frame after playback ended.
+- **The temporary PRELOADING inside `MSG_SEEK` is not reported** (`SetState(..., false)`); reporting it made restoring FINISH fire the finish callback a second time on every loop rewind.
+
 ### Android backend pipeline (src/android/)
 
 `MoviePlayerCore` owns one `VideoTrackPlayer` and one `AudioTrackPlayer`, each a `TrackPlayer` subclass wrapping an `AMediaCodec` + dedicated thread. Audio decoded PCM is forwarded to the same host-provided `IAudioSink` (the internal `AAudioStream`-based path has been removed — confirmed by `git log` reverting an internal `AudioEngine`). `MediaClock` sync mode (audio-master vs video-master) is decided in `PropagateSyncMode()` after both tracks have been set up.

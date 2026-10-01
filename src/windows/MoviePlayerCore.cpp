@@ -34,6 +34,10 @@ MoviePlayerCore::Init()
 
   mLastVideoFrameEnd = false;
   mLastAudioFrameEnd = false;
+  mDecodeProgressed  = false;
+
+  mLastVideoPtsUs       = -1;
+  mVideoFrameIntervalUs = 0;
 
   mIsLoop = false;
 
@@ -536,6 +540,7 @@ MoviePlayerCore::InputToDecoder(Decoder *decoder, bool inputIsEOS)
       mExtractor->Advance();
     }
     decoder->QueueFramePacketIndex(packetIndex);
+    mDecodeProgressed = true;
   }
 
   return packetIndex;
@@ -559,6 +564,7 @@ MoviePlayerCore::HandleVideoOutput()
     if (!mSawVideoOutputEOS && mVideoFrameNext == nullptr) {
       dcBufIndex = mVideoDecoder->DequeueDecodedBufferIndex();
       if (dcBufIndex >= 0) {
+        mDecodeProgressed  = true;
         DecodedBuffer *buf = mVideoDecoder->GetDecodedBuffer(dcBufIndex);
         mSawVideoOutputEOS = buf->isEndOfStream;
         if (!buf->isEndOfStream) {
@@ -601,7 +607,8 @@ MoviePlayerCore::HandleVideoOutput()
           // LOGV("video update: pts=%" PRId64 ", diff=%" PRId64 "\n",
           //      ns_to_us(mVideoFrameNext->timeStampNs), timeDiff);
           UpdateVideoFrameToNext();
-          isFrameReady = true;
+          isFrameReady      = true;
+          mDecodeProgressed = true;
         }
       }
     }
@@ -611,8 +618,11 @@ MoviePlayerCore::HandleVideoOutput()
     // 終了フラグを立てる
     if (mSawVideoOutputEOS && mVideoFrameNext == nullptr) {
       // LOGV("video last frame\n");
-      int64_t timeDiff = CalcDiffVideoTimeAndNow(mVideoFrame);
-      if (timeDiff >= 0) {
+      // 最終フレームも 1 フレーム分は表示してから終わる。表示開始時点で終わると、
+      // ループで巻き戻した先頭フレームにすぐ上書きされて最終フレームが見えない
+      // (表示時間がほぼ 0 になる)。
+      int64_t timeDiff = mVideoFrame ? CalcDiffVideoTimeAndNow(mVideoFrame) : 0;
+      if (!mVideoFrame || timeDiff >= VideoFrameDurationUs()) {
         // LOGV("video last frame END\n");
         mLastVideoFrameEnd = true;
       }
@@ -643,6 +653,7 @@ MoviePlayerCore::HandleAudioOutput()
   do {
     dcBufIndex = mAudioDecoder->DequeueDecodedBufferIndex();
     if (dcBufIndex >= 0) {
+      mDecodeProgressed  = true;
       DecodedBuffer *buf = mAudioDecoder->GetDecodedBuffer(dcBufIndex);
       mSawAudioOutputEOS = buf->isEndOfStream;
       if (buf->dataSize > 0 || buf->isEndOfStream) {
@@ -659,6 +670,7 @@ MoviePlayerCore::HandleAudioOutput()
 void
 MoviePlayerCore::Decode()
 {
+  mDecodeProgressed = false;
   DemuxInput();
   HandleVideoOutput();
   HandleAudioOutput();
@@ -681,8 +693,55 @@ MoviePlayerCore::Decode()
       Post(MSG_FINISH);
     }
   } else {
+    // 何も進まなかった (次フレームの表示時刻待ち / デコード結果待ち) なら、
+    // すぐ次の MSG_DECODE を回さずに少し待つ。以前は yield だけで回っていたため、
+    // 低フレームレートの動画でも再生中は CPU 1 コアを使い切っていた。
+    // 待っている間に Pause / Stop 等のメッセージが来たらすぐ戻る。
+    if (!mDecodeProgressed) {
+      WaitForMessage(CalcIdleWaitUs());
+    }
     Post(MSG_DECODE);
   }
+}
+
+int64_t
+MoviePlayerCore::VideoFrameDurationUs() const
+{
+  // 実際のフレーム間隔を優先し、まだ分からなければ (1 フレーム目) frameRate から。
+  // どちらも 1 秒で頭打ちにする (frameRate が壊れていると数千秒になり、
+  // 最終フレームの表示待ちが終わらなくなるため)
+  const int64_t maxUs = 1000000;
+  int64_t us          = mVideoFrameIntervalUs;
+  if (us <= 0 && mFrameRate >= 1.0f) {
+    us = s_to_us(1.0 / mFrameRate);
+  }
+  if (us < 0) us = 0;
+  if (us > maxUs) us = maxUs;
+  return us;
+}
+
+int64_t
+MoviePlayerCore::CalcIdleWaitUs() const
+{
+  // 音声があるときは sink の消費済みバッファを早めに引き取るため短めにする
+  const int64_t maxWaitUs  = IsAudioAvailable() ? 5000 : 10000;
+  // デコード結果待ちのポーリング間隔
+  const int64_t pollWaitUs = 2000;
+
+  int64_t waitUs = pollWaitUs;
+  if (mVideoFrameNext && mClock.IsStarted()) {
+    // 次フレームの表示時刻まで
+    int64_t diff = CalcDiffVideoTimeAndNow(mVideoFrameNext);
+    waitUs       = (diff < 0) ? -diff : 0;
+  } else if (mSawVideoOutputEOS && mVideoFrameNext == nullptr && mVideoFrame &&
+             !mLastVideoFrameEnd) {
+    // 最終フレームの表示時間が終わるまで
+    int64_t diff = CalcDiffVideoTimeAndNow(mVideoFrame);
+    waitUs       = VideoFrameDurationUs() - diff;
+  }
+  if (waitUs < 0) waitUs = 0;
+  if (waitUs > maxWaitUs) waitUs = maxWaitUs;
+  return waitUs;
 }
 
 void
@@ -750,20 +809,25 @@ MoviePlayerCore::HandleMessage(int32_t what, int64_t arg, void *data)
     Flush();
     mExtractor->SeekTo(arg);
     State savedState = GetState();
-    SetState(STATE_PRELOADING);
+    // 先頭フレームを出すための一時的な PRELOADING なので通知しない。通知すると
+    // 戻した時に元の状態 (終了 = FINISH 等) がもう一度通知され、終了後の巻き戻し
+    // (ループ) で利用側に終了が 2 回届く (ループの period イベントが 2 回出ていた)
+    SetState(STATE_PRELOADING, false);
     Decode();
-    SetState(savedState);
+    SetState(savedState, false);
   } break;
 
   case MSG_STOP:
-    SetVideoFrame(&mDummyFrame);
+    // 最後に出したコマを保持する (以前は seek 時に複製した古いコマ = 先頭コマ等を
+    // 再通知していたため、停止/終了後にレイヤが先頭コマへ戻っていた)
+    HoldLastVideoFrame();
     SetState(STATE_STOP);
     Post(MSG_NOP, 0, nullptr, true); // flush msg
     mEventFlag.Set(EVENT_FLAG_STOPPED);
     break;
 
   case MSG_FINISH:
-    SetVideoFrame(&mDummyFrame);
+    HoldLastVideoFrame();
     SetState(STATE_FINISH);
     Post(MSG_NOP, 0, nullptr, true); // flush msg
     mEventFlag.Set(EVENT_FLAG_STOPPED);
@@ -797,6 +861,7 @@ MoviePlayerCore::Flush()
   }
 
   mVideoFrameLastGet = nullptr;
+  mLastVideoPtsUs    = -1;
 
   // オーディオ出力待ちをフラッシュ
   if (mAudioDecoder != nullptr) {
@@ -839,6 +904,13 @@ MoviePlayerCore::UpdateVideoFrameToNext()
     // mDecodedFrameNextをmDecodedFrameへスライドする
     DecodedBuffer *newFrame = mVideoFrameNext;
     mVideoFrameNext         = nullptr;
+    if (newFrame) {
+      int64_t ptsUs = ns_to_us(newFrame->timeStampNs);
+      if (mLastVideoPtsUs >= 0 && ptsUs > mLastVideoPtsUs) {
+        mVideoFrameIntervalUs = ptsUs - mLastVideoPtsUs;
+      }
+      mLastVideoPtsUs = ptsUs;
+    }
     SetVideoFrame(newFrame);
   }
 }
@@ -877,11 +949,41 @@ MoviePlayerCore::SetVideoFrame(DecodedBuffer *newFrame)
 
       int64_t nowUs          = get_time_us();
       int64_t nowMediaUs     = mediaTimeUs;
-      int64_t durationUs     = s_to_us(1.0 / mFrameRate);
+      int64_t durationUs     = VideoFrameDurationUs();
+      if (durationUs <= 0) durationUs = s_to_us(1.0 / 30); // 不明なら 30fps 相当
       int64_t maxMediaTimeUs = mediaTimeUs + durationUs;
-      mClock.UpdateAnchorTime(nowMediaUs, nowUs, maxMediaTimeUs);
+      // 表示が予定時刻より少し (1 フレーム未満) 遅れただけなら、予定時刻を錨にする。
+      // 実際の表示時刻で錨を打ち直すと、待ちから起きる遅れ (タイマの粒度) が毎フレーム
+      // 積み重なって再生が遅くなる。1 フレーム以上遅れた (デコードが間に合わない等)
+      // ときは従来どおり今の時刻で打ち直す。
+      int64_t anchorRealUs = nowUs;
+      if (mClock.IsStarted()) {
+        int64_t scheduledUs = mClock.GetRealTimeFor(mediaTimeUs);
+        if (scheduledUs > 0 && scheduledUs <= nowUs && nowUs - scheduledUs < durationUs) {
+          anchorRealUs = scheduledUs;
+        }
+      }
+      mClock.UpdateAnchorTime(nowMediaUs, anchorRealUs, maxMediaTimeUs);
     }
   }
+}
+
+void
+MoviePlayerCore::HoldLastVideoFrame()
+{
+  if (!mVideoDecoder) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(mVideoFrameMutex);
+  if (mVideoFrame && mVideoFrame != &mDummyFrame) {
+    DecodedBuffer *prevFrame = mVideoFrame;
+    mDummyFrame.CopyFrom(prevFrame, false);
+    mVideoFrame = &mDummyFrame;
+    mVideoDecoder->ReleaseDecodedBufferIndex(prevFrame->bufIndex);
+  } else if (!mVideoFrame) {
+    mVideoFrame = &mDummyFrame;
+  }
+  // 既に表示済みの絵なので EnqueueVideo (= 更新通知) はしない
 }
 
 void
@@ -983,6 +1085,7 @@ MoviePlayerCore::DrainAudioSinkConsumed()
   while (mAudioSink->TryPopConsumed(&param)) {
     DecodedBuffer *buf = (DecodedBuffer *)param;
     if (!buf) continue;
+    mDecodeProgressed = true;
     if (buf->isEndOfStream) {
       mLastAudioFrameEnd = true;
     }
@@ -1027,7 +1130,7 @@ MoviePlayerCore::PreLoadInput()
 }
 
 void
-MoviePlayerCore::SetState(State newState)
+MoviePlayerCore::SetState(State newState, bool notify)
 {
   if (mAudioSink) {
     switch (newState) {
@@ -1046,7 +1149,7 @@ MoviePlayerCore::SetState(State newState)
   }
   if (mState != newState) {
     mState = newState;
-    if (mOnStateFunc) {
+    if (notify && mOnStateFunc) {
       mOnStateFunc(mState);
     }
   }

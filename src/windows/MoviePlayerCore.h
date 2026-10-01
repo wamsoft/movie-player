@@ -106,14 +106,22 @@ protected:
   void HandleAudioOutput();
   void Flush();
 
-  void SetState(State newState);
+  // notify=false は状態の切り替えを利用側へ通知しない (シーク中の一時的な PRELOADING 用)
+  void SetState(State newState, bool notify = true);
   bool IsCurrentState(State state) const;
 
   void InitDummyFrame();
   void UpdateVideoFrameToNext();
   void SetVideoFrame(DecodedBuffer *newFrame);
   void SetVideoFrameNext(DecodedBuffer *nextFrame);
+  // 表示中のフレームをダミーフレームへ複製して差し替える (デコーダのバッファは返す)。
+  // 停止/終了時に「最後に出したコマ」を保持したまま通知はしない。
+  void HoldLastVideoFrame();
   int64_t CalcDiffVideoTimeAndNow(DecodedBuffer *targetFrame) const;
+  // 1 フレームの表示時間 (us)。フレームレート不明なら 0
+  int64_t VideoFrameDurationUs() const;
+  // Decode() で何も進まなかったときに、次の仕事までどれだけ待ってよいか (us)
+  int64_t CalcIdleWaitUs() const;
 
   void EnqueueAudio(DecodedBuffer *buf);
   void EnqueueVideo(DecodedBuffer *buf);
@@ -145,6 +153,15 @@ private:
   bool mSawVideoOutputEOS, mSawAudioOutputEOS;
   bool mLastVideoFrameEnd;
   bool mLastAudioFrameEnd;
+
+  // 今回の Decode() で何か進んだか (入力投入 / 出力吸い上げ / フレーム更新 / 音声供給)。
+  // 何も進まなければ次の MSG_DECODE の前に少し待つ (ビジーループ回避)
+  bool mDecodeProgressed;
+
+  // 直近 2 フレームの PTS の差 (us)。コンテナの frameRate が当てにならない素材
+  // (極端に小さい値が入っているものがある) でも 1 フレームの表示時間を出すため。
+  int64_t mLastVideoPtsUs;
+  int64_t mVideoFrameIntervalUs;
 
   // メディアクロック
   MediaClock mClock;
