@@ -854,9 +854,11 @@ MoviePlayerCore::Flush()
   // あるいは mDecodedFrameを毎回ポインタではなくコピー保持にする方法でも良いが
   // 現状ではポインタ保持なのでFlushの絡むseek処理のみこのように対応している。
   // (実際の所スレッド絡みなので毎回コピー保持したほうが丸いので、将来的にはそうなるかも)
+  // 表示中の絵は変わらないので利用側へは通知しない (HoldLastVideoFrame)。以前は
+  // ここで同じ絵を通知し直しており、終了後の巻き戻し (ループ) では、まだ終了状態の
+  // うちに届くその通知を見た利用側が「停止した」と判断していた。
   if (mVideoFrame) {
-    mDummyFrame.CopyFrom(mVideoFrame, false);
-    SetVideoFrame(&mDummyFrame);
+    HoldLastVideoFrame();
     SetVideoFrameNext(nullptr);
   }
 
@@ -929,8 +931,6 @@ MoviePlayerCore::SetVideoFrame(DecodedBuffer *newFrame)
       return;
     }
 
-    EnqueueVideo(mVideoFrame);
-
     // LOGV("new video frame: pts=%" PRId64 " us\n", ns_to_us(mVideoFrame->timeStampNs));
 
     // 前フレームがダミーフレームでなければ開放
@@ -965,6 +965,10 @@ MoviePlayerCore::SetVideoFrame(DecodedBuffer *newFrame)
       }
       mClock.UpdateAnchorTime(nowMediaUs, anchorRealUs, maxMediaTimeUs);
     }
+
+    // 利用側への通知は時計を進めた後。コールバックの中で Position() を見たとき
+    // (コマ番号を出すとき) に、ひとつ前のフレームの時刻が返らないようにする
+    EnqueueVideo(mVideoFrame);
   }
 }
 

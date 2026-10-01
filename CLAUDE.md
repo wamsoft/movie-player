@@ -102,6 +102,8 @@ Pacing rules of the core thread (each one fixed a real bug — keep them):
 - **Video-master clock anchors at the scheduled time.** Without audio, `SetVideoFrame` re-anchors `MediaClock` per displayed frame; if the frame is less than one frame late it anchors at the *scheduled* real time, otherwise wake-up latency accumulates and playback runs slow.
 - **The last frame is shown for one frame duration** before `mLastVideoFrameEnd` (i.e. FINISH / loop rewind). Frame duration = measured PTS interval (`mVideoFrameIntervalUs`), falling back to `mFrameRate` only when it is ≥ 1 fps, clamped to 1 s — some files carry a bogus frame rate (e.g. 0.0005).
 - **STOP / FINISH keep the last displayed frame** (`HoldLastVideoFrame`: copy into `mDummyFrame`, release the decoder buffer, no `OnVideoDecoded`). The old code swapped in `mDummyFrame` as-is, which still held the frame copied at the last seek (usually frame 0), so the host's image snapped back to the first frame after playback ended.
+- **A seek's `Flush()` does not re-notify the current picture** (it also goes through `HoldLastVideoFrame`). Re-notifying it while still in FINISH made hosts that derive their status from the frame callback (`IsPlaying()` at callback time) see a spurious stop on every loop rewind.
+- **`SetVideoFrame` notifies the host after updating the clock**, so `Position()` read inside `OnVideoDecoded` is the new frame's time (hosts compute the frame number there), not the previous one's.
 - **The temporary PRELOADING inside `MSG_SEEK` is not reported** (`SetState(..., false)`); reporting it made restoring FINISH fire the finish callback a second time on every loop rewind.
 
 ### Android backend pipeline (src/android/)
