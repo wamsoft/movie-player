@@ -55,6 +55,7 @@ MoviePlayerCore::Init()
   mAudioCodecDelayUs      = 0;
   mAudioStartPtsNs        = 0;
   mAudioStartPtsValid     = false;
+  mAudioStartSamples      = 0;
   mAudioResumeMediaTimeUs = 0;
 }
 
@@ -779,9 +780,10 @@ MoviePlayerCore::HandleMessage(int32_t what, int64_t arg, void *data)
       mClock.ClearStartMediaTime();
 
       if (IsAudioAvailable()) {
-        // sink->GetSamplesPlayed の起点が変わるので start PTS を仕切り直す。
-        // 次に enqueue されるバッファの PTS が新しい起点になる。
-        mAudioStartPtsValid = false;
+        // 起点 (mAudioStartPtsNs / mAudioStartSamples) はそのまま使う。sink の
+        // 再生済みサンプル数は一時停止中は進まず、再開後も続きから数えるので、
+        // 対応はずれない。(以前はここで起点を取り直していたが、キューに残った
+        // 音声の分だけ次のバッファより前に鳴るので、時計がその分ずれていた)
 
         // sink からのクロック更新が走る前に video が描画判定を走ら
         // せる可能性に備えて、前回の最終タイムで start/anchor を初期化。
@@ -808,6 +810,9 @@ MoviePlayerCore::HandleMessage(int32_t what, int64_t arg, void *data)
   case MSG_SEEK: {
     Flush();
     mExtractor->SeekTo(arg);
+    // 位置 (Position) は音声ありだと音声の時計が最初に進むまで更新されないので、
+    // シーク先を入れておく (巻き戻し直後のコマ番号が終端のままにならないように)
+    mClock.SetPresentationTime(arg);
     State savedState = GetState();
     // 先頭フレームを出すための一時的な PRELOADING なので通知しない。通知すると
     // 戻した時に元の状態 (終了 = FINISH 等) がもう一度通知され、終了後の巻き戻し
@@ -1055,6 +1060,9 @@ MoviePlayerCore::EnqueueAudio(DecodedBuffer *data)
   // を呼ぶまで安定)。consumed 時にここから ReleaseDecodedBufferIndex を呼ぶ。
   if (!mAudioStartPtsValid) {
     mAudioStartPtsNs    = data->timeStampNs;
+    // ここ (起点を取り直すのは開いた直後とシーク後 = sink のキューが空のとき) から
+    // 鳴り始めるので、今の再生済みサンプル数が起点になる
+    mAudioStartSamples  = mAudioSink->GetSamplesPlayed();
     mAudioStartPtsValid = true;
   }
   mAudioSink->Enqueue(data->data, data->dataSize, data->isEndOfStream, data);
@@ -1107,7 +1115,11 @@ MoviePlayerCore::DrainAudioSinkConsumed()
   int64_t sampleRate = mAudioDecoder->SampleRate();
   if (sampleRate <= 0) return;
 
-  int64_t samplesPlayed = mAudioSink->GetSamplesPlayed();
+  // 再生済みサンプル数は通算なので、起点バッファを積んだ時点との差を使う。
+  // (以前は通算をそのまま足していたため、ループの巻き戻し後に時計が 1 周分先へ
+  //  飛び、先頭のフレームが一気に流れた後、終端で音声の終わりを長く待っていた)
+  int64_t samplesPlayed = mAudioSink->GetSamplesPlayed() - mAudioStartSamples;
+  if (samplesPlayed < 0) samplesPlayed = 0;
   int64_t playedUs      = calc_audio_duration_us(samplesPlayed, sampleRate);
   int64_t mediaTimeUs   = ns_to_us(mAudioStartPtsNs) + playedUs - mAudioCodecDelayUs;
   if (mediaTimeUs < 0) {

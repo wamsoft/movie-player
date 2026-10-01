@@ -181,6 +181,10 @@ private:
   uint64_t mAudioStartPtsNs;    // 最初に enqueue した audio buffer の PTS
                                 // (sink->GetSamplesPlayed と組合せて clock を計算)
   bool mAudioStartPtsValid;     // mAudioStartPtsNs が有効かどうか
+  // mAudioStartPtsNs のバッファを enqueue した時点の sink->GetSamplesPlayed()。
+  // sink の再生済みサンプル数は open からの通算で、シーク (Flush) でも 0 に戻らない
+  // ので、起点 PTS からの経過はこの値との差で測る。
+  int64_t mAudioStartSamples;
   int64_t mAudioResumeMediaTimeUs; // resume 時に最速反映するための最終出力時刻
 
   std::function<void(State)> mOnStateFunc;

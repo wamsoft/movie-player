@@ -55,7 +55,7 @@ codec output slot が pinned のままになり、codec input 側まで backpres
 ## 把握している問題
 
 - 共通
-  - pause/resume したときに、復帰後の数フレームがフレームスキップ扱いになる
+  - ~~pause/resume したときに、復帰後の数フレームがフレームスキップ扱いになる~~ (修正済み: 音声の時計が sink の通算の再生済みサンプル数をそのまま使っていた)
   - ※YUVテクスチャ処理がうまく対応できてない? 現在 ARBG 以外だと動作不良かも
 - Linux
   - 確認した WSL 環境では movie_player_test での描画が正しく行われない

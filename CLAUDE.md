@@ -104,6 +104,7 @@ Pacing rules of the core thread (each one fixed a real bug — keep them):
 - **STOP / FINISH keep the last displayed frame** (`HoldLastVideoFrame`: copy into `mDummyFrame`, release the decoder buffer, no `OnVideoDecoded`). The old code swapped in `mDummyFrame` as-is, which still held the frame copied at the last seek (usually frame 0), so the host's image snapped back to the first frame after playback ended.
 - **A seek's `Flush()` does not re-notify the current picture** (it also goes through `HoldLastVideoFrame`). Re-notifying it while still in FINISH made hosts that derive their status from the frame callback (`IsPlaying()` at callback time) see a spurious stop on every loop rewind.
 - **`SetVideoFrame` notifies the host after updating the clock**, so `Position()` read inside `OnVideoDecoded` is the new frame's time (hosts compute the frame number there), not the previous one's.
+- **The audio clock is relative to the sink's played count at the start buffer.** `IAudioSink::GetSamplesPlayed()` is a running total since open (the krkrz sink returns miniaudio's `ma_sound_get_time_in_pcm_frames`, which a seek/`Flush` does not reset), so `DrainAudioSinkConsumed` uses `played - mAudioStartSamples`, where `mAudioStartSamples` is captured when the first buffer after open/seek is enqueued. Resume keeps the existing origin (the count does not advance while paused). Adding the raw total made the clock jump one lap ahead after a loop rewind and by the paused duration after resume.
 - **The temporary PRELOADING inside `MSG_SEEK` is not reported** (`SetState(..., false)`); reporting it made restoring FINISH fire the finish callback a second time on every loop rewind.
 
 ### Android backend pipeline (src/android/)
@@ -124,7 +125,7 @@ Pacing rules of the core thread (each one fixed a real bug — keep them):
 
 ### Known issues (from README)
 
-- Pause/resume leaves a few frames classed as frame-skips after resume.
+- ~~Pause/resume leaves a few frames classed as frame-skips after resume.~~ Fixed: the audio clock used the sink's running sample total (see pacing rules above).
 - YUV texture pass-through (non-ARGB color formats) may misbehave.
 - WSL/WSLg: `movie_player_test` runs but renders incorrectly.
 
