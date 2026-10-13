@@ -334,7 +334,10 @@ MoviePlayerCore::SelectTargetTrack()
         // 5コア以上なら4スレッド、4コア以下なら2スレッド。
         // テストでは1080pくらいなら4スレッド以上は特に変わらない感じ。
         config.vpx.decCfg.threads = get_num_of_cpus() > 4 ? 4 : 2;
-        config.vpx.rgbFormat      = mPixelFormat;
+        // rgbFormat は「RGB へ変換するときの変換先」。 YUV (I420 等) を要求された
+        // ときは変換なし (UNKNOWN) にして VPx の生出力 (I420) をそのまま使う。
+        // YUV をそのまま渡すと VpxDecoder::Configure の ASSERT で abort する。
+        config.vpx.rgbFormat      = is_rgb_pixel_format(mPixelFormat) ? mPixelFormat : PIXEL_FORMAT_UNKNOWN;
         config.vpx.alphaMode      = info.v.alphaMode;
         mVideoDecoder->Configure(config);
 
