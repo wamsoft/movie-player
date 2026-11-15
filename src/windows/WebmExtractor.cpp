@@ -121,6 +121,8 @@ WebmExtractor::OpenSetup()
 {
   int ret;
 
+  const int64_t startPos = mReader->Tell();
+
   nestegg_io io = { &MyRead, &MySeek, &MyTell, this };
   ret           = nestegg_init(&mCtx, io, &NestEggLogCallback, -1);
   if (ret < 0) {
@@ -145,7 +147,76 @@ WebmExtractor::OpenSetup()
   }
   LOGV("tracks=%u\n", mTracks);
 
+  EstimateFrameRates(startPos);
+
   return true;
+}
+
+void
+WebmExtractor::EstimateFrameRates(int64_t startPos)
+{
+  // DefaultDuration の無い映像トラックを集める
+  std::map<unsigned int, std::vector<uint64_t>> stamps;
+  for (unsigned int t = 0; t < mTracks; ++t) {
+    if (nestegg_track_type(mCtx, t) != NESTEGG_TRACK_VIDEO) continue;
+    uint64_t dd = 0;
+    if (nestegg_track_default_duration(mCtx, t, &dd) == 0 && dd > 0) continue;
+    stamps[t];
+  }
+  if (stamps.empty()) {
+    return;
+  }
+
+  // mCtx の読み位置を崩さないよう、別の nestegg で先頭からパケットを読み、
+  // 終わったらリーダーの位置を戻す。mCtx の解析状態は mCtx 側に持たれていて
+  // リーダーの位置さえ戻せば続きから読める。
+  const int64_t curPos = mReader->Tell();
+  if (curPos < 0 || mReader->Seek(startPos, NESTEGG_SEEK_SET) != 0) {
+    return;
+  }
+
+  nestegg *ctx  = nullptr;
+  nestegg_io io = { &MyRead, &MySeek, &MyTell, this };
+  if (nestegg_init(&ctx, io, &NestEggLogCallback, -1) == 0) {
+    // 1 トラックあたり最大 kMaxFrames 個、全体で kMaxPackets 個まで見る
+    const size_t kMaxFrames  = 61;
+    const int kMaxPackets    = 2000;
+    size_t pending           = stamps.size();
+    for (int n = 0; n < kMaxPackets && pending > 0; ++n) {
+      nestegg_packet *pkt = nullptr;
+      if (nestegg_read_packet(ctx, &pkt) <= 0) break;
+      unsigned int track;
+      uint64_t ts;
+      if (nestegg_packet_track(pkt, &track) == 0 &&
+          nestegg_packet_tstamp(pkt, &ts) == 0) {
+        auto it = stamps.find(track);
+        if (it != stamps.end() && it->second.size() < kMaxFrames) {
+          it->second.push_back(ts);
+          if (it->second.size() == kMaxFrames) --pending;
+        }
+      }
+      nestegg_free_packet(pkt);
+    }
+    nestegg_destroy(ctx);
+  }
+
+  mReader->Seek(curPos, NESTEGG_SEEK_SET);
+
+  // タイムスタンプは TimecodeScale (通常 1ms) で丸められているので、隣どうしの
+  // 1 区間ではなく (最後 - 最初) / (個数 - 1) の平均間隔から求める。
+  // 並びが表示順でない素材もありうるので並べ替えてから使う。
+  for (auto &kv : stamps) {
+    std::vector<uint64_t> &v = kv.second;
+    std::sort(v.begin(), v.end());
+    v.erase(std::unique(v.begin(), v.end()), v.end());
+    if (v.size() < 2) continue;
+    const double spanNs = (double)(v.back() - v.front());
+    if (spanNs <= 0) continue;
+    const double fps = (double)(v.size() - 1) * 1e9 / spanNs;
+    mEstimatedFrameRates[(int32_t)kv.first] = (float)fps;
+    LOGV("track %u: no DefaultDuration, estimated fps=%f from %u frames\n",
+         kv.first, fps, (unsigned)v.size());
+  }
 }
 
 size_t
@@ -187,13 +258,25 @@ WebmExtractor::GetTrackInfo(int32_t trackIndex, TrackInfo *info)
       return false;
     }
 
-    uint64_t default_duration;
-    nestegg_track_default_duration(mCtx, trackIndex, &default_duration);
+    // DefaultDuration が無い素材では nestegg_track_default_duration は -1 を返し
+    // 値を書かない。その場合は OpenSetup で先頭のパケットから求めた値を使い、
+    // それも無ければ 0 (不明) とする。
+    float frameRate = 0.0f;
+    uint64_t default_duration = 0;
+    if (nestegg_track_default_duration(mCtx, trackIndex, &default_duration) == 0 &&
+        default_duration > 0) {
+      frameRate = (float)(1.0 / ns_to_s((int64_t)default_duration));
+    } else {
+      auto it = mEstimatedFrameRates.find(trackIndex);
+      if (it != mEstimatedFrameRates.end()) {
+        frameRate = it->second;
+      }
+    }
 
     info->type         = TRACK_TYPE_VIDEO;
     info->v.width      = vparams.width;
     info->v.height     = vparams.height;
-    info->v.frameRate  = 1.0f / ns_to_s(default_duration);
+    info->v.frameRate  = frameRate;
     info->v.colorRange = (ColorRange)vparams.range;
     info->v.alphaMode  = vparams.alpha_mode;
 

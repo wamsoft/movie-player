@@ -5,6 +5,7 @@
 #include "MkvFileReader.h"
 #include <nestegg/nestegg.h>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -64,6 +65,7 @@ public:
 
 private:
   bool OpenSetup();
+  void EstimateFrameRates(int64_t startPos);
 
   static void NestEggLogCallback(nestegg *ctx, unsigned int severity, char const *fmt,
                                  ...);
@@ -97,4 +99,7 @@ private:
   bool mIsKeyFrame;
 
   IMkvFileReader *mReader;
+
+  // DefaultDuration の無い映像トラックの、先頭パケットから求めたフレームレート
+  std::map<int32_t, float> mEstimatedFrameRates;
 };
