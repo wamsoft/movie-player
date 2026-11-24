@@ -37,7 +37,12 @@ void
 TrackPlayer::Done()
 {
   if (mCodec != nullptr) {
+    // stop だけでは codec 本体 (ハードウェアデコーダのバッファ) が解放されず、
+    // 動画を開いて閉じるたびに端末の空きメモリが 1080p で約 160MB ずつ減っていく
+    // (数十本で lmkd に前面アプリごと落とされる)。デストラクタからはスレッド停止後に
+    // 呼ばれるので、ここで delete してよい。
     AMediaCodec_stop(mCodec);
+    AMediaCodec_delete(mCodec);
     mCodec = nullptr;
   }
 
