@@ -63,8 +63,21 @@ MessageLooper::AddMessage(Message &&msg, bool flush)
   std::lock_guard<std::mutex> lk(mMessageMutex);
 
   if (flush) {
-    // std::queue には clear() がない
-    mMessageQueue = {};
+    // 終了要求 (PostQuitMessage) だけは捨てずに残す。
+    // 再生スレッドは MSG_STOP の処理中に flush 付きの Post で発行済みメッセージを捨てる。
+    // 呼び出し側が StopThread の終了要求を積んだ直後にこの flush が走ると、終了要求まで
+    // 消えて MessageLoop が抜けず、StopThread の join が永久に戻らなくなる
+    // (再生が終端まで行った後に Stop → 破棄、の順で起きる)。
+    bool hadQuit = false;
+    while (!mMessageQueue.empty()) {
+      if (mMessageQueue.front().quit) {
+        hadQuit = true;
+      }
+      mMessageQueue.pop();
+    }
+    if (hadQuit) {
+      mMessageQueue.push({ MSG_SPECIAL, 0, nullptr, true });
+    }
   }
   mMessageQueue.push(msg);
   mMessageCond.notify_all();
